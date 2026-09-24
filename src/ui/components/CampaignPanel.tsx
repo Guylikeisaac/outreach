@@ -23,7 +23,7 @@ const blank = (): Draft => ({
   targetRoles: ['Founders', 'Co-founders', 'Recruiters', 'Talent Acquisition', 'HR', 'Hiring Managers', 'CTOs'],
   targetLocations: ['India'],
   dailyTarget: 20,
-  autoSend: false,
+  autoSend: true,
   dailySendLimit: 15,
 });
 
@@ -121,7 +121,7 @@ export function CampaignPanel() {
               {qualifiedToday}
               <span className="text-base text-dim"> / {draft.dailyTarget} qualified</span>
             </div>
-            {draft.autoSend && (
+            {draft.autoSend !== false && (
               <div className="mt-0.5 text-xs tabular-nums text-gold-2">
                 {sentToday} / {sendLimit} requests sent · Autopilot on
               </div>
@@ -171,7 +171,7 @@ export function CampaignPanel() {
             </Button>
           ) : (
             <Button variant="primary" size="lg" onClick={() => start('search')} busy={busy === 'search' || busy === 'save'}>
-              {draft.autoSend ? 'START AUTOPILOT' : 'START DISCOVERY'}
+              {draft.autoSend !== false ? 'START AUTOPILOT' : 'START DISCOVERY'}
             </Button>
           )}
           <Button
@@ -185,7 +185,7 @@ export function CampaignPanel() {
           >
             SCAN TAB
           </Button>
-          {draft.autoSend && !running && (
+          {draft.autoSend !== false && !running && (
             <Button
               variant="secondary"
               className="col-span-2"
@@ -302,12 +302,12 @@ export function CampaignPanel() {
           </div>
         </Field>
 
-        <div className={`space-y-3 rounded-2xl border p-3.5 ${draft.autoSend ? 'border-gold/40 bg-gold/5' : 'border-line-2 bg-panel-2'}`}>
+        <div className={`space-y-3 rounded-2xl border p-3.5 ${draft.autoSend !== false ? 'border-gold/40 bg-gold/5' : 'border-line-2 bg-panel-2'}`}>
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
               className="mt-0.5 accent-[#d4af6a]"
-              checked={!!draft.autoSend}
+              checked={draft.autoSend !== false}
               onChange={(e) => patch({ autoSend: e.target.checked })}
             />
             <span>
@@ -318,7 +318,7 @@ export function CampaignPanel() {
               </span>
             </span>
           </label>
-          {draft.autoSend && (
+          {draft.autoSend !== false && (
             <Field label="Daily send limit" hint="Sends are spaced 1–2.5 minutes apart. LinkedIn restricts accounts that send too many invites — stay modest.">
               <div className="flex items-center gap-3">
                 <input

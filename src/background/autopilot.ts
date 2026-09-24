@@ -48,16 +48,21 @@ class StopRun extends Error {}
  * Runs the Autopilot queue for a campaign. `shouldStop` is polled between every step so the
  * user's STOP takes effect quickly; `status` reports progress to the dashboard.
  */
-export async function runAutopilot(campaign: Campaign, shouldStop: () => boolean, status: (message: string) => Promise<void>): Promise<void> {
+export async function runAutopilot(
+  campaign: Campaign,
+  shouldStop: () => boolean,
+  status: (message: string) => Promise<void>,
+  opts: { quiet?: boolean } = {},
+): Promise<void> {
   const limit = sendLimit(campaign);
   let sent = await sentToday(campaign.id);
   if (sent >= limit) {
-    await log(`Autopilot: daily send limit reached (${sent}/${limit})`, { level: 'success', campaignId: campaign.id });
+    if (!opts.quiet) await log(`Autopilot: daily send limit reached (${sent}/${limit})`, { level: 'success', campaignId: campaign.id });
     return;
   }
   const queue = queueFor(await get('prospects'), campaign.id);
   if (!queue.length) {
-    await log('Autopilot: no qualified prospects waiting for outreach', { campaignId: campaign.id });
+    if (!opts.quiet) await log('Autopilot: no qualified prospects waiting for outreach', { campaignId: campaign.id });
     return;
   }
   await log(`Autopilot started — ${queue.length} qualified prospect(s) queued, ${limit - sent} send(s) left today`, { campaignId: campaign.id });

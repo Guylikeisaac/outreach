@@ -67,7 +67,7 @@ async function handleUi(req: UiRequest): Promise<UiResponse> {
           targetRoles: c.targetRoles,
           targetLocations: c.targetLocations.length ? c.targetLocations : ['India'],
           dailyTarget: Math.min(200, Math.max(1, Math.round(c.dailyTarget) || 20)),
-          autoSend: Boolean(c.autoSend),
+          autoSend: c.autoSend !== false,
           dailySendLimit: Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, Math.round(c.dailySendLimit ?? DEFAULT_DAILY_SEND_LIMIT) || DEFAULT_DAILY_SEND_LIMIT)),
           createdAt: existing?.createdAt ?? ts,
           updatedAt: ts,
@@ -101,7 +101,7 @@ async function handleUi(req: UiRequest): Promise<UiResponse> {
       const run = await get('runState');
       if (run.phase === 'running' || run.phase === 'stopping') throw new Error('A run is already in progress.');
       const campaign = (await get('campaigns'))[req.campaignId];
-      if (req.type === 'START_AUTOPILOT' && !campaign?.autoSend) throw new Error('Turn on Autopilot for this campaign first.');
+      if (req.type === 'START_AUTOPILOT' && campaign?.autoSend === false) throw new Error('Turn on Autopilot for this campaign first.');
       // Runs in the background; progress is reported through storage.
       void startDiscovery(req.campaignId, req.type === 'START_DISCOVERY' ? 'search' : req.type === 'SCAN_CURRENT_TAB' ? 'current_tab' : 'autopilot');
       return { ok: true };

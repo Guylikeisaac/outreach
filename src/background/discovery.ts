@@ -44,7 +44,7 @@ export async function startDiscovery(campaignId: string, mode: 'search' | 'curre
   const campaign = (await get('campaigns'))[campaignId];
   if (!campaign) throw new Error('Campaign not found.');
   if (mode === 'search' && !campaign.searchQueries.length) throw new Error('Add at least one search query.');
-  if (mode === 'autopilot' && !campaign.autoSend) throw new Error('Turn on Autopilot for this campaign first.');
+  if (mode === 'autopilot' && campaign.autoSend === false) throw new Error('Turn on Autopilot for this campaign first.');
 
   stopRequested = false;
   targetReached = false;
@@ -92,6 +92,11 @@ export async function startDiscovery(campaignId: string, mode: 'search' | 'curre
       const res = await sendToTab<ScanResponse>(tabId, { type: 'SCAN_POSTS', maxPosts: maxPostsPerQuery, scroll: true });
       if (!res?.ok) throw new SafeStop(res?.error ?? 'No response from the LinkedIn page.', res?.diagnostics ?? null);
       await processPosts(res.posts, campaign);
+      // Autopilot: message the people just found right away, instead of after every search.
+      if (!stopRequested && campaign.autoSend !== false) {
+        const fresh = (await get('campaigns'))[campaignId] ?? campaign;
+        await runAutopilot(fresh, () => stopRequested, (message) => setRun({ message }), { quiet: true });
+      }
       if (stopRequested || targetReached) break;
       await new Promise((r) => setTimeout(r, 2500 + Math.random() * 2500)); // human-paced between searches
     }
@@ -103,7 +108,7 @@ export async function startDiscovery(campaignId: string, mode: 'search' | 'curre
       });
 
     // Autopilot (enabled per campaign by the user): send connection requests with the note.
-    if (!stopRequested && campaign.autoSend) {
+    if (!stopRequested && campaign.autoSend !== false) {
       const fresh = (await get('campaigns'))[campaignId] ?? campaign;
       await runAutopilot(fresh, () => stopRequested, (message) => setRun({ message }));
     }
@@ -111,7 +116,7 @@ export async function startDiscovery(campaignId: string, mode: 'search' | 'curre
     const sent = await sentToday(campaignId);
     await setRun({
       phase: 'idle',
-      message: stopRequested ? 'Stopped by you' : campaign.autoSend ? `Done — ${r.added} new, ${sent} sent today` : `Done — ${r.added} new prospect(s)`,
+      message: stopRequested ? 'Stopped by you' : campaign.autoSend !== false ? `Done — ${r.added} new, ${sent} sent today` : `Done — ${r.added} new prospect(s)`,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
