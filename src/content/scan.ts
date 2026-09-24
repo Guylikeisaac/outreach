@@ -19,28 +19,40 @@ function controlLabel(el: Element): string {
   return (el.getAttribute('aria-label') || text(el)).replace(/\s+/g, ' ').trim();
 }
 
-/** The post's "Like" control (a reaction button), in any markup variant. */
-function isLikeControl(el: HTMLElement): boolean {
-  const own = firstLine(text(el));
-  const aria = el.getAttribute('aria-label') ?? '';
-  return (
-    own === 'Like' ||
-    /^React Like\b/i.test(aria) ||
-    /^Like\b/.test(aria) ||
-    /^Reaction button state/i.test(aria) ||
-    /^(?:Like|Celebrate|Support|Love|Insightful|Funny)$/.test(own) && /reaction|react/i.test(aria)
-  );
+const CLICKABLE = 'button, [role="button"], a, [tabindex]';
+
+/**
+ * Elements whose own visible text is exactly `word` (e.g. "Like"), whatever their tag — LinkedIn's
+ * newer markup renders action-bar controls as plain div/span elements, not <button>s.
+ * Returns the nearest clickable ancestor when there is one, else the text's parent element.
+ */
+function elementsLabelled(words: RegExp, root: Node = document.body): HTMLElement[] {
+  const out = new Set<HTMLElement>();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = n.nodeValue?.trim();
+    if (!t || t.length > 12 || !words.test(t)) continue;
+    const parent = n.parentElement;
+    if (!parent) continue;
+    const control = (parent.closest(CLICKABLE) as HTMLElement | null) ?? parent;
+    if (isVisible(control)) out.add(control);
+  }
+  // Also accept aria-labelled reaction buttons whose visible text isn't "Like".
+  if (root instanceof Element || root === document.body) {
+    for (const b of (root as Element).querySelectorAll<HTMLElement>('[aria-label]')) {
+      const aria = b.getAttribute('aria-label') ?? '';
+      if (words.source.includes('Like') && /^(?:React Like|Reaction button state|Like)\b/i.test(aria) && isVisible(b)) out.add(b);
+    }
+  }
+  const arr = [...out];
+  return arr.filter((el) => !arr.some((o) => o !== el && o.contains(el)));
 }
 
-function likeControls(root: ParentNode = document): HTMLElement[] {
-  const found = [...root.querySelectorAll<HTMLElement>('button, [role="button"]')].filter((b) => isLikeControl(b) && isVisible(b));
-  // Nested matches (button > span[role=button]) → keep the outermost.
-  return found.filter((el) => !found.some((o) => o !== el && o.contains(el)));
-}
+const LIKE_WORD = /^Like$/;
+const OTHER_ACTION_WORD = /^(?:Comment|Repost|Send)$/;
 
-/** Other action-bar controls; used to confirm a like control really belongs to a post. */
-function hasSiblingActions(node: HTMLElement): boolean {
-  return [...node.querySelectorAll<HTMLElement>('button, [role="button"]')].some((b) => /^(?:Comment|Repost|Send)$/i.test(firstLine(text(b))) || /^(?:Comment|Repost|Send in a private message)\b/i.test(b.getAttribute('aria-label') ?? ''));
+function likeControls(root: Node = document.body): HTMLElement[] {
+  return elementsLabelled(LIKE_WORD, root);
 }
 
 function byUrnAttributes(): HTMLElement[] {
@@ -54,20 +66,20 @@ function byUrnAttributes(): HTMLElement[] {
 
 /**
  * Each post = the largest ancestor of its Like control that contains exactly one Like control
- * (i.e. it grows until it would swallow the neighbouring post), and that has an author link.
+ * (it grows until it would swallow the neighbouring post), has an author link, and has the other
+ * action-bar controls (Comment / Repost / Send).
  */
 function byActionBar(): HTMLElement[] {
   const likes = likeControls();
+  const others = elementsLabelled(OTHER_ACTION_WORD);
   const out = new Set<HTMLElement>();
-  const main = document.querySelector('main') ?? document.body;
   for (const like of likes) {
     let best: HTMLElement | null = null;
-    let node: HTMLElement | null = like.parentElement;
-    for (let depth = 0; node && node !== main && node !== document.body && depth < 25; depth++, node = node.parentElement) {
-      if (likeControls(node).length > 1) break;
+    for (let node = like.parentElement, depth = 0; node && node !== document.body && depth < 30; node = node.parentElement, depth++) {
+      if (likes.some((l) => l !== like && node!.contains(l))) break;
       best = node;
     }
-    if (best && best.querySelector(AUTHOR_LINK) && hasSiblingActions(best)) out.add(best);
+    if (best && best.querySelector(AUTHOR_LINK) && others.some((o) => best!.contains(o))) out.add(best);
   }
   const arr = [...out];
   return arr.filter((el) => !arr.some((o) => o !== el && o.contains(el)));
@@ -263,12 +275,21 @@ export function scanDiagnostics(): string {
       .join(' ');
     return `<${el.tagName.toLowerCase()} ${attrs}>`;
   };
-  const likeish = [...document.querySelectorAll<HTMLElement>('button, [role="button"]')].filter((b) => /\blike\b|react/i.test(controlLabel(b))).slice(0, 3);
+  const likeish = likeControls().slice(0, 2);
+  const shadowHosts = [...document.querySelectorAll('*')].filter((e) => e.shadowRoot).length;
+  const likeTextNodes = (() => {
+    let n = 0;
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let t = w.nextNode(); t; t = w.nextNode()) if (t.nodeValue?.trim() === 'Like') n++;
+    return n;
+  })();
   const out = [
     `url: ${location.pathname}${location.search.slice(0, 80)}`,
-    `main: ${!!document.querySelector('main')}, data-urn: ${document.querySelectorAll('[data-urn]').length}, data-id: ${document.querySelectorAll('[data-id]').length}, role=article: ${document.querySelectorAll('[role="article"]').length}, role=listitem: ${document.querySelectorAll('[role="listitem"]').length}`,
-    `buttons: ${document.querySelectorAll('button').length}, like controls: ${likeControls().length}, /in/ links: ${document.querySelectorAll('a[href*="/in/"]').length}, /company/ links: ${document.querySelectorAll('a[href*="/company/"]').length}`,
+    `main: ${!!document.querySelector('main')}, iframes: ${document.querySelectorAll('iframe').length}, shadow hosts: ${shadowHosts}, data-urn: ${document.querySelectorAll('[data-urn]').length}, role=listitem: ${document.querySelectorAll('[role="listitem"]').length}`,
+    `buttons: ${document.querySelectorAll('button').length}, "Like" text nodes: ${likeTextNodes}, like controls: ${likeControls().length}, other actions: ${elementsLabelled(OTHER_ACTION_WORD).length}`,
+    `/in/ links: ${document.querySelectorAll('a[href*="/in/"]').length}, /company/ links: ${document.querySelectorAll('a[href*="/company/"]').length}, all links: ${document.querySelectorAll('a[href]').length}`,
     `containers found: ${findPostContainers().length}`,
+    `sample hrefs: ${[...document.querySelectorAll<HTMLAnchorElement>('main a[href], a[href]')].slice(0, 400).map((a) => a.getAttribute('href') ?? '').filter((h) => /linkedin|^\//.test(h)).map((h) => h.replace(/\?.*$/, '').replace(/(\/(?:in|company)\/)[^/]+/, '$1…')).filter((h, i, all) => all.indexOf(h) === i).slice(0, 12).join(' ')}`,
   ];
   likeish.forEach((b, i) => {
     out.push(`like-ish #${i}: label="${controlLabel(b).slice(0, 60)}"`);
@@ -287,8 +308,11 @@ export async function scanPosts(
 ): Promise<{ posts: RawPost[]; truncated: boolean } | null> {
   const appeared = await waitFor(() => findPostContainers().length > 0, 15000, 400);
   if (!appeared) {
-    // An empty result page is valid; an unrecognizable page is not.
-    const emptyState = /no results found|try removing filters|no matching/i.test(text(document.querySelector('main') ?? document.body));
+    // A genuinely empty result page is valid (LinkedIn shows a visible "No results found" heading);
+    // anything else means we couldn't recognise the posts → fail with diagnostics, never silently.
+    const emptyState = [...document.querySelectorAll<HTMLElement>('h1, h2, h3, p, span')].some(
+      (el) => isVisible(el) && /^No results found\.?$/i.test((el.textContent ?? '').trim()),
+    );
     return emptyState ? { posts: [], truncated: false } : null;
   }
 
