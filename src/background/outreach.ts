@@ -5,7 +5,7 @@ import type { ConnectionStatus, OutreachStatus, Prospect, WorkflowState } from '
 import { OUTREACH_STATUSES } from '@shared/types';
 import type { ContentEvent, DetectResponse, PrepareResponse } from '@shared/messages';
 import { PAGE_STRUCTURE_ERROR } from '@shared/messages';
-import { generateMessage, validateMessage } from '@shared/message';
+import { DEFAULT_TEMPLATE, renderTemplate, validateMessage } from '@shared/message';
 import { qualify } from '@shared/qualification';
 import { normalizeProfileUrl } from '@shared/linkedin';
 import { get, set, update, withLock } from '@shared/storage';
@@ -152,7 +152,7 @@ export async function generateFor(prospectId: string): Promise<string> {
       await log(`AI personalization unavailable, used template (${e instanceof Error ? e.message : e})`, { level: 'warn', prospectId });
     }
   }
-  const message = generateMessage(p.firstName || '[First Name]', p.hiringRole, aiLine);
+  const message = renderTemplate(settings.messageTemplate || DEFAULT_TEMPLATE, p.firstName || '[First Name]', p.hiringRole, aiLine);
   await patchProspect(prospectId, (x) => {
     x.message = message;
     if (x.outreachStatus === 'NEW') x.outreachStatus = 'REVIEWED';

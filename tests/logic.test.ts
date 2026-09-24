@@ -9,7 +9,7 @@ import {
   identifyHiringContact,
 } from '../src/shared/extraction';
 import { qualify } from '../src/shared/qualification';
-import { generateMessage, LINKEDIN_NOTE_LIMIT, validateMessage } from '../src/shared/message';
+import { DEFAULT_TEMPLATE, generateMessage, LINKEDIN_NOTE_LIMIT, renderTemplate, templateIssues, validateMessage } from '../src/shared/message';
 import { buildProspect } from '../src/shared/pipeline';
 import { dateFromActivityId, dateFromRelativeTime, normalizeProfileUrl } from '../src/shared/linkedin';
 
@@ -195,5 +195,23 @@ describe('message', () => {
   it('validation', () => {
     expect(validateMessage('[First Name], hi', '').some((i) => i.level === 'error')).toBe(true);
     expect(validateMessage('x'.repeat(301), 'x').some((i) => i.level === 'error')).toBe(true);
+  });
+});
+
+describe('message template', () => {
+  it('default template matches the built-in message', () => {
+    expect(renderTemplate(DEFAULT_TEMPLATE, 'Rahul', 'Senior Backend Engineer')).toBe(generateMessage('Rahul', 'Senior Backend Engineer'));
+    expect(renderTemplate(DEFAULT_TEMPLATE, 'Rahul', '')).not.toContain('{hiring_line}');
+    expect(renderTemplate(DEFAULT_TEMPLATE, 'Rahul', '')).toContain('Rahul, not selling anything 😄\nWe’re building');
+  });
+  it('custom template replaces the name', () => {
+    const t = 'Hi {first_name}, this is Shruti from SyncUp 👋\n{hiring_line}\nWould love to connect!';
+    expect(renderTemplate(t, 'Sreeja', '')).toBe('Hi Sreeja, this is Shruti from SyncUp 👋\nWould love to connect!');
+    expect(renderTemplate(t, 'Sreeja', 'Data Analyst')).toContain("Saw you're hiring a Data Analyst.");
+  });
+  it('flags missing name token and unknown tokens', () => {
+    expect(templateIssues('Hi Shruti, hello')).toHaveLength(1);
+    expect(templateIssues('Hi {first_name} {company}')[0]).toMatch(/Unknown/);
+    expect(templateIssues(DEFAULT_TEMPLATE)).toEqual([]);
   });
 });

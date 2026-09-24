@@ -4,6 +4,7 @@
 import type { Campaign } from '@shared/types';
 import type { ContentEvent, UiRequest, UiResponse } from '@shared/messages';
 import { isLinkedInUrl } from '@shared/linkedin';
+import { templateIssues } from '@shared/message';
 import { get, set, update, withLock } from '@shared/storage';
 import { log } from './log';
 import { requestStop, setRun, startDiscovery } from './discovery';
@@ -127,6 +128,10 @@ async function handleUi(req: UiRequest): Promise<UiResponse> {
       const s = req.settings;
       if (s.supabaseUrl && !/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(s.supabaseUrl.trim()))
         throw new Error('Supabase URL must look like https://<project>.supabase.co');
+      if (s.messageTemplate !== undefined) {
+        const issues = templateIssues(s.messageTemplate);
+        if (issues.length) throw new Error(issues[0]);
+      }
       await update('settings', (cur) => ({
         ...cur,
         ...s,

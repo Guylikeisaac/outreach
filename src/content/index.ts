@@ -5,7 +5,7 @@ import type { ContentEvent, ContentRequest, PingResponse, PrepareResponse, ScanR
 import { PAGE_STRUCTURE_ERROR } from '@shared/messages';
 import { pageKind, sleep, waitFor } from './dom';
 import { scanDiagnostics, scanPosts } from './scan';
-import { detectConnection, findInviteDialog, findNoteField, findSendButton, prepareConnect, profileDiagnostics, verifyPending } from './profile';
+import { detectConnection, findInviteDialog, findNoteField, findSendButton, noteValue, prepareConnect, profileDiagnostics, verifyPending } from './profile';
 import { removeOverlay, showOverlay } from './overlay';
 
 declare global {
@@ -69,17 +69,17 @@ async function handlePrepare(req: Extract<ContentRequest, { type: 'PREPARE_CONNE
   const panel = showOverlay({
     mode: 'confirm',
     name: req.expectedName,
-    getMessage: () => (field.isConnected ? field.value : ''),
+    getMessage: () => (field.isConnected ? noteValue(field) : ''),
     maxLength: res.noteMaxLength,
     onSend: async () => {
       const dialog = findInviteDialog();
       const liveField = dialog ? findNoteField(dialog) : null;
       const send = dialog ? findSendButton(dialog) : null;
-      if (!dialog || !liveField || !liveField.value.trim() || !send) {
+      if (!dialog || !liveField || !noteValue(liveField).trim() || !send) {
         panel.setInfo(`${PAGE_STRUCTURE_ERROR} Please click Send in LinkedIn yourself, or cancel.`);
         return;
       }
-      const finalMessage = liveField.value;
+      const finalMessage = noteValue(liveField);
       panel.setInfo('Submitting…');
       observer.disconnect(); // we handle completion ourselves from here
       send.click();
@@ -103,9 +103,9 @@ async function handlePrepare(req: Extract<ContentRequest, { type: 'PREPARE_CONNE
   });
 
   // If the user sends or closes via LinkedIn's own dialog buttons, record what actually happened.
-  const lastMessage = { value: field.value };
+  const lastMessage = { value: noteValue(field) };
   const observer = new MutationObserver(async () => {
-    if (field.isConnected) lastMessage.value = field.value;
+    if (field.isConnected) lastMessage.value = noteValue(field);
     if (findInviteDialog() || finished) return;
     observer.disconnect();
     await sleep(800);

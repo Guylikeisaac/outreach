@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Settings } from '@shared/types';
 import { get } from '@shared/storage';
+import { DEFAULT_TEMPLATE, LINKEDIN_NOTE_LIMIT, renderTemplate, templateIssues } from '@shared/message';
 import { send, timeLabel, useStore } from '../hooks';
 import { Button, Card, Field, inputCls, useAction } from './ui';
 
@@ -28,6 +29,46 @@ export function SettingsPanel() {
 
   return (
     <div className="space-y-4">
+      <Card className="space-y-3 p-4">
+        <div>
+          <div className="text-sm font-semibold">Connection message</div>
+          <div className="mt-0.5 text-xs text-dim">
+            <code className="text-gold-2">{'{first_name}'}</code> becomes each person’s first name.{' '}
+            <code className="text-gold-2">{'{hiring_line}'}</code> becomes “Saw you’re hiring a …” when a role was found in their post, and is removed otherwise.
+          </div>
+        </div>
+        <textarea
+          className={`${inputCls} h-44 resize-y font-mono !text-xs leading-relaxed`}
+          value={draft.messageTemplate}
+          onChange={(e) => patch({ messageTemplate: e.target.value })}
+          spellCheck={false}
+        />
+        {templateIssues(draft.messageTemplate).map((i) => (
+          <div key={i} className="text-[11px] text-bad">
+            ✗ {i}
+          </div>
+        ))}
+        <div>
+          <div className="label-caps !text-[9px]">Preview — Rahul, hiring a Backend Engineer</div>
+          {(() => {
+            const preview = renderTemplate(draft.messageTemplate, 'Rahul', 'Backend Engineer');
+            return (
+              <>
+                <div className="mt-1.5 whitespace-pre-wrap rounded-xl border border-line bg-panel-2 p-3 text-xs leading-relaxed text-silver">{preview}</div>
+                <div className={`mt-1 text-right text-[10px] tabular-nums ${preview.length > LINKEDIN_NOTE_LIMIT ? 'text-bad' : 'text-dim'}`}>
+                  {preview.length}/{LINKEDIN_NOTE_LIMIT}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+        <div className="flex justify-end">
+          <Button size="sm" variant="ghost" onClick={() => patch({ messageTemplate: DEFAULT_TEMPLATE })}>
+            Reset to default
+          </Button>
+        </div>
+      </Card>
+
       <Card className="space-y-4 p-4">
         <div>
           <div className="text-sm font-semibold">Backend (Supabase)</div>

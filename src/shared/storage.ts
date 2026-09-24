@@ -3,6 +3,7 @@
 
 import type { ActivityLog, Campaign, Prospect, RunState, Settings, WorkflowState } from './types';
 import { normalizeProfileUrl } from './linkedin';
+import { DEFAULT_TEMPLATE } from './message';
 
 export interface StoreShape {
   campaigns: Record<string, Campaign>;
@@ -36,6 +37,7 @@ export const DEFAULTS: StoreShape = {
     supabaseUrl: '',
     supabaseAnonKey: '',
     anthropicApiKey: '',
+    messageTemplate: DEFAULT_TEMPLATE,
     useAiPersonalization: false,
     maxPostsPerQuery: 25,
   },

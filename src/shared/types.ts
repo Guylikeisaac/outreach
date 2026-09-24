@@ -151,6 +151,8 @@ export interface Settings {
   supabaseUrl: string;
   supabaseAnonKey: string;
   anthropicApiKey: string;
+  /** Connection note template; {first_name} and {hiring_line} are filled per prospect. */
+  messageTemplate: string;
   useAiPersonalization: boolean;
   /** Max posts to scroll through per search query per run. */
   maxPostsPerQuery: number;

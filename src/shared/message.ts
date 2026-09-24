@@ -21,6 +21,40 @@ function article(role: string): string {
   return /^[aeiou]/i.test(first) ? 'an ' : 'a ';
 }
 
+/**
+ * Default template. Tokens: {first_name} (required) and {hiring_line} (the "Saw you're hiring…"
+ * line, or removed when no role was found in the post).
+ */
+export const DEFAULT_TEMPLATE = [
+  '{first_name}, not selling anything 😄',
+  '{hiring_line}',
+  ...BODY,
+].join('\n');
+
+/** Renders a user template for one prospect. Unknown data is never invented: tokens without data are removed. */
+export function renderTemplate(template: string, firstName: string, hiringRole: string, aiLine?: string | null): string {
+  const line = aiLine || personalizationLine(hiringRole);
+  const fill = (withLine: boolean) =>
+    template
+      .replace(/\{\s*first[_ ]?name\s*\}/gi, firstName.trim())
+      .replace(/^[ \t]*\{\s*hiring[_ ]?line\s*\}[ \t]*\r?\n?/gim, withLine && line ? `${line}\n` : '')
+      .replace(/\{\s*hiring[_ ]?line\s*\}/gi, withLine && line ? line : '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  const full = fill(true);
+  return full.length <= LINKEDIN_NOTE_LIMIT ? full : fill(false);
+}
+
+export function templateIssues(template: string): string[] {
+  const issues: string[] = [];
+  if (!/\{\s*first[_ ]?name\s*\}/i.test(template)) issues.push('Add {first_name} where the person’s name should go.');
+  const unknown = template.match(/\{[^}]*\}/g)?.filter((t) => !/^\{\s*(?:first[_ ]?name|hiring[_ ]?line)\s*\}$/i.test(t)) ?? [];
+  if (unknown.length) issues.push(`Unknown placeholder(s): ${unknown.join(', ')}. Use {first_name} or {hiring_line}.`);
+  const preview = renderTemplate(template, 'Priyadarshini', '');
+  if (preview.length > LINKEDIN_NOTE_LIMIT) issues.push(`Too long: ${preview.length}/${LINKEDIN_NOTE_LIMIT} characters with a long name.`);
+  return issues;
+}
+
 export function personalizationLine(hiringRole: string): string {
   const role = hiringRole.trim();
   if (!role || role.length > 45) return '';
