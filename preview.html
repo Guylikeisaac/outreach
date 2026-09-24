@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SyncUp Outreach — UI preview</title>
+    <script src="/dev/mock-chrome.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>const w = new URLSearchParams(location.search).get("w"); if (w) document.getElementById("root").style.cssText = `width:${w}px;overflow:hidden;outline:1px dashed #333`;</script>
+    <script type="module" src="/src/ui/main.tsx"></script>
+  </body>
+</html>
