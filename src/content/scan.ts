@@ -1,12 +1,47 @@
-// Extracts posts from LinkedIn search results / feed pages. Uses several independent strategies so a
-// single class-name change doesn't break discovery; if none of them find posts, the scan fails safely.
+// Extracts posts from LinkedIn search results / feed pages.
+//
+// LinkedIn ships different markups (legacy `data-urn` + BEM classes, and a newer obfuscated/SDUI
+// markup with neither). So container detection is anchored on what every post visibly has — its
+// Like / Comment / Repost action bar — and fields are parsed from visible text lines. Class-based
+// selectors are only used as a bonus when present. If nothing matches, the scan fails safely and
+// returns a structure summary for debugging.
 
 import type { RawPost } from '@shared/types';
-import { firstLine, jitter, text, waitFor } from './dom';
+import { firstLine, isVisible, jitter, text, waitFor } from './dom';
 
-const URN_RE = /urn:li:(activity|ugcPost|share):(\d{10,})/;
+const URN_RE = /urn(?::|%3A)li(?::|%3A)(activity|ugcPost|share)(?::|%3A)(\d{15,})/i;
+const AUTHOR_LINK = 'a[href*="/in/"], a[href*="/company/"], a[href*="/school/"], a[href*="/showcase/"]';
 
 // ── Locate post containers ─────────────────────────────────────────────────────────────────
+
+/** Short visible label of a control: aria-label, else its own text. */
+function controlLabel(el: Element): string {
+  return (el.getAttribute('aria-label') || text(el)).replace(/\s+/g, ' ').trim();
+}
+
+/** The post's "Like" control (a reaction button), in any markup variant. */
+function isLikeControl(el: HTMLElement): boolean {
+  const own = firstLine(text(el));
+  const aria = el.getAttribute('aria-label') ?? '';
+  return (
+    own === 'Like' ||
+    /^React Like\b/i.test(aria) ||
+    /^Like\b/.test(aria) ||
+    /^Reaction button state/i.test(aria) ||
+    /^(?:Like|Celebrate|Support|Love|Insightful|Funny)$/.test(own) && /reaction|react/i.test(aria)
+  );
+}
+
+function likeControls(root: ParentNode = document): HTMLElement[] {
+  const found = [...root.querySelectorAll<HTMLElement>('button, [role="button"]')].filter((b) => isLikeControl(b) && isVisible(b));
+  // Nested matches (button > span[role=button]) → keep the outermost.
+  return found.filter((el) => !found.some((o) => o !== el && o.contains(el)));
+}
+
+/** Other action-bar controls; used to confirm a like control really belongs to a post. */
+function hasSiblingActions(node: HTMLElement): boolean {
+  return [...node.querySelectorAll<HTMLElement>('button, [role="button"]')].some((b) => /^(?:Comment|Repost|Send)$/i.test(firstLine(text(b))) || /^(?:Comment|Repost|Send in a private message)\b/i.test(b.getAttribute('aria-label') ?? ''));
+}
 
 function byUrnAttributes(): HTMLElement[] {
   const els = [
@@ -14,26 +49,25 @@ function byUrnAttributes(): HTMLElement[] {
       '[data-urn*="urn:li:activity:"], [data-id*="urn:li:activity:"], [data-chameleon-result-urn*="urn:li:activity:"], [data-urn*="urn:li:ugcPost:"], [data-urn*="urn:li:share:"]',
     ),
   ];
-  // Keep outermost containers only.
-  return els.filter((el) => !els.some((other) => other !== el && other.contains(el)));
+  return els.filter((el) => !els.some((other) => other !== el && other.contains(el)) && likeControls(el).length <= 1);
 }
 
-/** Fallback: climb from each post's social "Like" control to the nearest block holding an author link. */
-function bySocialActions(): HTMLElement[] {
-  const likes = [...document.querySelectorAll<HTMLElement>('button[aria-label], button')].filter((b) => {
-    const l = (b.getAttribute('aria-label') ?? '').trim();
-    return /^React Like\b/i.test(l) || /^Like\b/.test(l) || (!l && text(b) === 'Like');
-  });
+/**
+ * Each post = the largest ancestor of its Like control that contains exactly one Like control
+ * (i.e. it grows until it would swallow the neighbouring post), and that has an author link.
+ */
+function byActionBar(): HTMLElement[] {
+  const likes = likeControls();
   const out = new Set<HTMLElement>();
+  const main = document.querySelector('main') ?? document.body;
   for (const like of likes) {
+    let best: HTMLElement | null = null;
     let node: HTMLElement | null = like.parentElement;
-    for (let depth = 0; node && depth < 14; depth++, node = node.parentElement) {
-      const hasAuthor = node.querySelector('a[href*="/in/"], a[href*="/company/"]');
-      if (hasAuthor && text(node).length > 80) {
-        out.add(node);
-        break;
-      }
+    for (let depth = 0; node && node !== main && node !== document.body && depth < 25; depth++, node = node.parentElement) {
+      if (likeControls(node).length > 1) break;
+      best = node;
     }
+    if (best && best.querySelector(AUTHOR_LINK) && hasSiblingActions(best)) out.add(best);
   }
   const arr = [...out];
   return arr.filter((el) => !arr.some((o) => o !== el && o.contains(el)));
@@ -41,108 +75,156 @@ function bySocialActions(): HTMLElement[] {
 
 export function findPostContainers(): HTMLElement[] {
   const primary = byUrnAttributes();
-  return primary.length ? primary : bySocialActions();
+  return primary.length ? primary : byActionBar();
 }
 
 // ── Extract one post ───────────────────────────────────────────────────────────────────────
 
-const ACTOR_SELECTORS = ['.update-components-actor', '.feed-shared-actor', '[data-view-name="feed-actor"]'];
+const ACTOR_SELECTORS = ['.update-components-actor', '.feed-shared-actor'];
 const TEXT_SELECTORS = [
   '.update-components-text',
   '.feed-shared-update-v2__description',
   '.feed-shared-inline-show-more-text',
   '.update-components-update-v2__commentary',
-  '[data-view-name="feed-commentary"]',
 ];
-const HEADER_NOISE = /\b(?:reposted|likes? this|commented|celebrates?|loves? this|supports? this|finds? this|insightful|funny|follows?)\b/i;
+const HEADER_NOISE = /\b(?:reposted|likes? this|commented on this|celebrates? this|loves? this|supports? this|finds? this|reacted)\b/i;
+const DEGREE_RE = /(?:^|[•·\s])(1st|2nd|3rd\+?)(?=\s|$)/;
+const TIME_RE = /^(\d+\s*(?:s|m|min|h|hr|d|w|mo|yr|y))(?:\s|•|·|$)/i;
+const NOISE_LINE = /^(?:•|·|Follow|Following|\+\s*Follow|Promoted|Verified|Premium|Edited|Visible to anyone.*|View .* profile|Show translation|See translation)$/i;
 
 function findUrn(container: HTMLElement): { kind: string; id: string } | null {
-  const attrs = ['data-urn', 'data-id', 'data-chameleon-result-urn'];
-  const nodes = [container, ...container.querySelectorAll<HTMLElement>('[data-urn], [data-id], [data-chameleon-result-urn]')];
+  // Any attribute on the container, its descendants, or its close ancestors may carry the URN.
+  const nodes: Element[] = [container, ...container.querySelectorAll('*')];
+  let anc = container.parentElement;
+  for (let i = 0; anc && i < 4; i++, anc = anc.parentElement) nodes.push(anc);
   for (const n of nodes) {
-    for (const a of attrs) {
-      const m = n.getAttribute(a)?.match(URN_RE);
-      if (m) return { kind: m[1], id: m[2] };
+    for (const attr of n.attributes) {
+      if (!attr.value.includes('urn') ) continue;
+      const m = attr.value.match(URN_RE);
+      if (m) return { kind: m[1].replace(/^ugcpost$/i, 'ugcPost'), id: m[2] };
     }
-  }
-  for (const a of container.querySelectorAll<HTMLAnchorElement>('a[href*="urn:li:"]')) {
-    const m = decodeURIComponent(a.href).match(URN_RE);
-    if (m) return { kind: m[1], id: m[2] };
   }
   return null;
 }
 
-function findActor(container: HTMLElement): { block: HTMLElement | null; link: HTMLAnchorElement | null } {
+function actorLink(container: HTMLElement): { link: HTMLAnchorElement; block: HTMLElement | null } | null {
   for (const sel of ACTOR_SELECTORS) {
     const block = container.querySelector<HTMLElement>(sel);
-    const link = block?.querySelector<HTMLAnchorElement>('a[href*="/in/"], a[href*="/company/"]');
-    if (block && link) return { block, link };
+    const link = block?.querySelector<HTMLAnchorElement>(AUTHOR_LINK);
+    if (block && link) return { link, block };
   }
-  // Generic: first profile/company link that isn't part of a "X reposted this" header.
-  const links = [...container.querySelectorAll<HTMLAnchorElement>('a[href*="/in/"], a[href*="/company/"]')];
-  for (const link of links) {
-    const lineText = text(link.closest('div, span') ?? link);
-    if (HEADER_NOISE.test(lineText) && lineText.length < 120) continue;
-    if (!firstLine(text(link))) continue;
-    return { block: link.parentElement as HTMLElement, link };
+  // Generic: the first author link with a visible name, skipping "X reposted/likes this" headers.
+  for (const link of container.querySelectorAll<HTMLAnchorElement>(AUTHOR_LINK)) {
+    const name = firstLine(text(link));
+    if (!name || name.length < 2) continue;
+    const row = text(link.parentElement?.parentElement ?? link);
+    if (HEADER_NOISE.test(row) && row.length < 160) continue;
+    return { link, block: null };
   }
-  return { block: null, link: null };
+  return null;
 }
-
-const DEGREE_RE = /(?:^|[•·\s])(1st|2nd|3rd\+?)(?:\s|$)/;
-const TIME_RE = /^(\d+\s*(?:s|m|min|h|hr|d|w|mo|yr|y))\b/i;
 
 function cleanName(raw: string): string {
   return firstLine(raw)
-    .replace(/\s*[•·]\s*(?:1st|2nd|3rd\+?|Following|Follow).*$/i, '')
-    .replace(/\b(?:View|View:)\s.*$/, '')
-    .replace(/\s*(?:Verified|Premium)(?:\s+Profile)?\s*$/i, '')
+    .replace(DEGREE_RE, ' ')
+    .replace(/\s*[•·].*$/, '')
+    .replace(/\s*(?:Verified|Premium)(?:\s+(?:Profile|Member))?.*$/i, '')
+    .replace(/^View\s+/i, '')
+    .replace(/[’']s\s+(?:profile|graphic link)$/i, '')
     .trim();
 }
 
-function actorDetails(block: HTMLElement | null, link: HTMLAnchorElement) {
-  const q = (sel: string) => (block ? text(block.querySelector(sel)?.querySelector('span[aria-hidden="true"]') ?? block.querySelector(sel)) : '');
-  let name = q('.update-components-actor__title') || q('.update-components-actor__name') || q('.feed-shared-actor__name');
-  let headline = q('.update-components-actor__description') || q('.feed-shared-actor__description');
-  let time = q('.update-components-actor__sub-description') || q('.feed-shared-actor__sub-description');
-  const lines = text(block ?? link)
+function lines(el: Element): string[] {
+  return text(el)
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
-  if (!name) name = cleanName(text(link)) || cleanName(lines[0] ?? '');
-  name = cleanName(name);
-  if (!headline) {
-    headline =
-      lines.find((l, i) => i > 0 && l !== name && !DEGREE_RE.test(` ${l} `) && !TIME_RE.test(l) && !/^(?:•|Follow|Following|Promoted)$/i.test(l) && l.length > 3) ?? '';
-  }
-  if (!time) time = lines.find((l) => TIME_RE.test(l)) ?? '';
-  const degree = (text(block ?? link).match(DEGREE_RE)?.[1] ?? '').replace(/\+$/, '+');
-  return { name, headline: firstLine(headline), time: time.match(TIME_RE)?.[1] ?? '', degree };
 }
 
-function postBody(container: HTMLElement, actorBlock: HTMLElement | null): HTMLElement | null {
+/** Parses "Name • 3rd+ / Headline / 40m • Edited" from the post's visible lines. */
+function parseHeader(container: HTMLElement, link: HTMLAnchorElement, block: HTMLElement | null) {
+  const pick = (sel: string) => {
+    const el = block?.querySelector(sel);
+    return el ? text(el.querySelector('span[aria-hidden="true"]') ?? el) : '';
+  };
+  let name = cleanName(pick('.update-components-actor__title') || pick('.update-components-actor__name'));
+  let headline = firstLine(pick('.update-components-actor__description'));
+  let time = pick('.update-components-actor__sub-description');
+
+  const all = lines(container);
+  if (!name) {
+    // The link's own text is usually the name (possibly followed by degree/headline lines).
+    name = cleanName(text(link)) || cleanName(link.getAttribute('aria-label') ?? '');
+  }
+  const start = Math.max(0, all.findIndex((l) => name && l.startsWith(name)));
+  const header = all.slice(start, start + 8);
+  const degree = header.join(' ').match(DEGREE_RE)?.[1] ?? '';
+  if (!time) time = header.find((l) => TIME_RE.test(l)) ?? '';
+  if (!headline) {
+    headline =
+      header.find(
+        (l, i) =>
+          i > 0 &&
+          !l.startsWith(name) &&
+          !TIME_RE.test(l) &&
+          !NOISE_LINE.test(l) &&
+          !/^\+?\s*Follow(?:ing)?\b/i.test(l) &&
+          !/^[•·]?\s*(?:1st|2nd|3rd\+?)$/.test(l) &&
+          !/^\d[\d,.]*\s+followers?$/i.test(l) &&
+          l.length > 2,
+      ) ?? '';
+    // Company pages show a follower count instead of a headline.
+    if (!headline) headline = header.find((l) => /followers?$/i.test(l)) ?? '';
+  }
+  return { name, headline, time: time.match(TIME_RE)?.[1] ?? '', degree, headerLineCount: start + 8 };
+}
+
+/** Post body: known commentary selectors, else the longest text block outside header and action bar. */
+function postBody(container: HTMLElement, link: HTMLAnchorElement): HTMLElement | null {
   for (const sel of TEXT_SELECTORS) {
     const el = container.querySelector<HTMLElement>(sel);
-    if (el && text(el).length > 0) return el;
+    if (el && (el.textContent ?? '').trim()) return el;
   }
-  // Fallback: the largest dir="ltr" text block that isn't inside the actor block.
-  const candidates = [...container.querySelectorAll<HTMLElement>('[dir="ltr"], span.break-words')].filter(
-    (el) => !actorBlock?.contains(el),
-  );
-  return candidates.sort((a, b) => text(b).length - text(a).length)[0] ?? null;
+  const likes = likeControls(container);
+  let best: HTMLElement | null = null;
+  let bestLen = 0;
+  for (const el of container.querySelectorAll<HTMLElement>('div, span, p')) {
+    if (el.contains(link) || likes.some((l) => el.contains(l)) || el.querySelector('button, [role="button"]:not(a)') && el.querySelectorAll('button').length > 1) continue;
+    const len = (el.textContent ?? '').trim().length;
+    // Prefer the deepest element among equally long ones (no wrapper noise).
+    if (len > bestLen || (len === bestLen && (best as HTMLElement | null)?.contains(el))) {
+      best = el;
+      bestLen = len;
+    }
+  }
+  return bestLen >= 20 ? best : null;
+}
+
+function bodyText(el: HTMLElement | null): string {
+  if (!el) return '';
+  // textContent includes text hidden by line-clamping; innerText keeps line breaks. Use whichever is longer.
+  const inner = text(el);
+  const content = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const raw = content.length > inner.replace(/\s+/g, ' ').length + 20 ? content : inner;
+  return raw
+    .replace(/(?:…|\.\.\.)\s*(?:see|show)?\s*more\s*$/i, '')
+    .replace(/\s*(?:Show|See) translation\s*$/i, '')
+    .trim();
 }
 
 function extractPost(container: HTMLElement): RawPost | null {
-  const { block, link } = findActor(container);
-  if (!link) return null;
-  const urn = findUrn(container);
-  const body = postBody(container, block);
-  const postText = text(body).replace(/…\s*(?:see|show)\s+more\s*$/i, '').trim();
+  const actor = actorLink(container);
+  if (!actor) return null;
+  const { link, block } = actor;
+  const header = parseHeader(container, link, block);
+  if (!header.name) return null;
+
+  const body = postBody(container, link);
+  const postText = bodyText(body);
   if (!postText) return null;
 
-  const details = actorDetails(block, link);
-  const href = link.href;
-  const authorType = /\/in\//.test(href) ? 'person' : /\/company\//.test(href) ? 'company' : 'unknown';
+  const href = link.href.split('?')[0];
+  const authorType = /\/in\//.test(href) ? 'person' : /\/(?:company|school|showcase)\//.test(href) ? 'company' : 'unknown';
 
   const mentionedPeople: RawPost['mentionedPeople'] = [];
   const companyLinks: RawPost['companyLinks'] = [];
@@ -153,21 +235,47 @@ function extractPost(container: HTMLElement): RawPost | null {
     else if (/\/company\//.test(a.href)) companyLinks.push({ name, url: a.href });
   }
 
-  const postPath = urn ? `/feed/update/urn:li:${urn.kind}:${urn.id}/` : '';
+  const urn = findUrn(container);
   const fallbackLink = container.querySelector<HTMLAnchorElement>('a[href*="/feed/update/"], a[href*="/posts/"]');
   return {
-    postUrl: postPath ? `https://www.linkedin.com${postPath}` : fallbackLink?.href.split('?')[0] ?? '',
+    postUrl: urn ? `https://www.linkedin.com/feed/update/urn:li:${urn.kind}:${urn.id}/` : fallbackLink?.href.split('?')[0] ?? '',
     activityId: urn?.kind === 'activity' ? urn.id : '',
-    authorName: details.name,
-    authorUrl: href.split('?')[0],
+    authorName: header.name,
+    authorUrl: href,
     authorType,
-    authorHeadline: details.headline,
-    authorDegree: details.degree,
-    relativeTime: details.time,
+    authorHeadline: header.headline,
+    authorDegree: header.degree,
+    relativeTime: header.time,
     postText: postText.slice(0, 5000),
     companyLinks,
     mentionedPeople,
   };
+}
+
+// ── Diagnostics ────────────────────────────────────────────────────────────────────────────
+
+/** Compact, content-light description of the page structure, for fixing selectors. */
+export function scanDiagnostics(): string {
+  const describe = (el: Element) => {
+    const attrs = [...el.attributes]
+      .filter((a) => a.name !== 'style')
+      .map((a) => `${a.name}${a.value && a.value.length < 60 ? `="${a.value}"` : ''}`)
+      .join(' ');
+    return `<${el.tagName.toLowerCase()} ${attrs}>`;
+  };
+  const likeish = [...document.querySelectorAll<HTMLElement>('button, [role="button"]')].filter((b) => /\blike\b|react/i.test(controlLabel(b))).slice(0, 3);
+  const out = [
+    `url: ${location.pathname}${location.search.slice(0, 80)}`,
+    `main: ${!!document.querySelector('main')}, data-urn: ${document.querySelectorAll('[data-urn]').length}, data-id: ${document.querySelectorAll('[data-id]').length}, role=article: ${document.querySelectorAll('[role="article"]').length}, role=listitem: ${document.querySelectorAll('[role="listitem"]').length}`,
+    `buttons: ${document.querySelectorAll('button').length}, like controls: ${likeControls().length}, /in/ links: ${document.querySelectorAll('a[href*="/in/"]').length}, /company/ links: ${document.querySelectorAll('a[href*="/company/"]').length}`,
+    `containers found: ${findPostContainers().length}`,
+  ];
+  likeish.forEach((b, i) => {
+    out.push(`like-ish #${i}: label="${controlLabel(b).slice(0, 60)}"`);
+    let n: Element | null = b;
+    for (let d = 0; n && d < 14; d++, n = n.parentElement) out.push(`  ${'  '.repeat(Math.min(d, 6))}${describe(n).slice(0, 180)}`);
+  });
+  return out.join('\n');
 }
 
 // ── Public scan ────────────────────────────────────────────────────────────────────────────
@@ -180,7 +288,7 @@ export async function scanPosts(
   const appeared = await waitFor(() => findPostContainers().length > 0, 15000, 400);
   if (!appeared) {
     // An empty result page is valid; an unrecognizable page is not.
-    const emptyState = /no results found|try removing filters|no matching/i.test(text(document.querySelector('main')));
+    const emptyState = /no results found|try removing filters|no matching/i.test(text(document.querySelector('main') ?? document.body));
     return emptyState ? { posts: [], truncated: false } : null;
   }
 
@@ -205,6 +313,8 @@ export async function scanPosts(
     onProgress(seen.size);
     stale = seen.size === before ? stale + 1 : 0;
   }
+  // Containers were found but none could be parsed → treat as a structure problem, not "no posts".
+  if (seen.size === 0) return null;
   const posts = [...seen.values()].slice(0, maxPosts);
   return { posts, truncated: seen.size > maxPosts };
 }

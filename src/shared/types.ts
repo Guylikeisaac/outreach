@@ -167,6 +167,8 @@ export interface RunState {
   message: string;
   /** Set when a LinkedIn operation failed safely and can be retried. */
   lastError: string | null;
+  /** Page-structure summary captured when a scan fails, for fixing selectors. */
+  diagnostics?: string | null;
   updatedAt: string;
 }
 
@@ -181,5 +183,6 @@ export interface WorkflowState {
     | 'done'
     | 'stopped';
   detail: string;
+  diagnostics?: string | null;
   updatedAt: string;
 }

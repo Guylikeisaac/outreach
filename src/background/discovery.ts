@@ -31,7 +31,11 @@ async function qualifiedToday(campaign: Campaign): Promise<number> {
   ).length;
 }
 
-class SafeStop extends Error {}
+class SafeStop extends Error {
+  constructor(message: string, readonly diagnostics: string | null = null) {
+    super(message);
+  }
+}
 
 export async function startDiscovery(campaignId: string, mode: 'search' | 'current_tab') {
   const run = await get('runState');
@@ -42,7 +46,7 @@ export async function startDiscovery(campaignId: string, mode: 'search' | 'curre
 
   stopRequested = false;
   targetReached = false;
-  await setRun({ phase: 'running', campaignId, currentQuery: '', scanned: 0, added: 0, lastError: null, message: 'Starting discovery…' });
+  await setRun({ phase: 'running', campaignId, currentQuery: '', scanned: 0, added: 0, lastError: null, diagnostics: null, message: 'Starting discovery…' });
   await log(mode === 'search' ? `Discovery started — ${campaign.searchQueries.length} search(es)` : 'Scanning current LinkedIn page', {
     campaignId,
     metadata: { queries: campaign.searchQueries },
@@ -74,7 +78,7 @@ export async function startDiscovery(campaignId: string, mode: 'search' | 'curre
       const { maxPostsPerQuery } = await get('settings');
       await setRun({ message: 'Reading posts…' });
       const res = await sendToTab<ScanResponse>(tabId, { type: 'SCAN_POSTS', maxPosts: maxPostsPerQuery, scroll: true });
-      if (!res?.ok) throw new SafeStop(res?.error ?? 'No response from the LinkedIn page.');
+      if (!res?.ok) throw new SafeStop(res?.error ?? 'No response from the LinkedIn page.', res?.diagnostics ?? null);
       await processPosts(res.posts, campaign);
       if (stopRequested || targetReached) break;
       await new Promise((r) => setTimeout(r, 2500 + Math.random() * 2500)); // human-paced between searches
@@ -87,8 +91,9 @@ export async function startDiscovery(campaignId: string, mode: 'search' | 'curre
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await setRun({ phase: 'error', lastError: msg, message: 'Stopped safely' });
-    await log(`Discovery stopped: ${msg}`, { level: 'error', campaignId });
+    const diagnostics = e instanceof SafeStop ? e.diagnostics : null;
+    await setRun({ phase: 'error', lastError: msg, diagnostics, message: 'Stopped safely' });
+    await log(`Discovery stopped: ${msg}`, { level: 'error', campaignId, metadata: diagnostics ? { diagnostics } : {} });
   } finally {
     stopRequested = false;
     void syncNow();

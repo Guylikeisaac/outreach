@@ -4,8 +4,8 @@
 import type { ContentEvent, ContentRequest, PingResponse, PrepareResponse, ScanResponse } from '@shared/messages';
 import { PAGE_STRUCTURE_ERROR } from '@shared/messages';
 import { pageKind, sleep, waitFor } from './dom';
-import { scanPosts } from './scan';
-import { detectConnection, findInviteDialog, findNoteField, findSendButton, prepareConnect, verifyPending } from './profile';
+import { scanDiagnostics, scanPosts } from './scan';
+import { detectConnection, findInviteDialog, findNoteField, findSendButton, prepareConnect, profileDiagnostics, verifyPending } from './profile';
 import { removeOverlay, showOverlay } from './overlay';
 
 declare global {
@@ -45,7 +45,8 @@ async function handlePrepare(req: Extract<ContentRequest, { type: 'PREPARE_CONNE
         },
       });
     }
-    return { ok: res.ok, stage: res.stage, status: res.status, error: res.error } as PrepareResponse;
+    const diagnostics = res.stage === 'structure' || res.stage === 'no_dialog' ? profileDiagnostics() : undefined;
+    return { ok: res.ok, stage: res.stage, status: res.status, error: res.error, diagnostics } as PrepareResponse;
   }
 
   workflowActive = true;
@@ -130,10 +131,12 @@ async function handle(req: ContentRequest): Promise<unknown> {
   switch (req.type) {
     case 'SCAN_POSTS': {
       const result = await scanPosts(req.maxPosts, req.scroll, (found) => emit({ type: 'SCAN_PROGRESS', found }));
-      return (result ? { ok: true, ...result } : { ok: false, error: PAGE_STRUCTURE_ERROR }) satisfies ScanResponse;
+      return (result ? { ok: true, ...result } : { ok: false, error: PAGE_STRUCTURE_ERROR, diagnostics: scanDiagnostics() }) satisfies ScanResponse;
     }
-    case 'DETECT_CONNECTION':
-      return detectConnection(req.expectedName);
+    case 'DETECT_CONNECTION': {
+      const res = await detectConnection(req.expectedName);
+      return res.ok ? res : { ...res, diagnostics: profileDiagnostics() };
+    }
     case 'PREPARE_CONNECT':
       return handlePrepare(req);
   }

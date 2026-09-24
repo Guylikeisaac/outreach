@@ -46,7 +46,7 @@ async function applyConnectionStatus(p: Prospect, status: ConnectionStatus) {
 
 export async function checkConnection(prospectId: string): Promise<ConnectionStatus> {
   const p = await mustGet(prospectId);
-  await setWorkflow({ prospectId, step: 'checking_connection', detail: `Opening ${p.name}'s profile…` });
+  await setWorkflow({ prospectId, step: 'checking_connection', detail: `Opening ${p.name}'s profile…`, diagnostics: null });
   await log(`Checking connection status for ${p.name}`, { prospectId, campaignId: p.campaignId });
 
   let res: DetectResponse;
@@ -66,7 +66,7 @@ export async function checkConnection(prospectId: string): Promise<ConnectionSta
       if (identity && OUTREACH_OPEN.includes(x.outreachStatus)) x.outreachStatus = 'SKIPPED';
     });
     await log(identity ? `${error} Prospect skipped.` : `${STATUS_TEXT.UNKNOWN}: ${error}`, { level: 'warn', prospectId, campaignId: p.campaignId });
-    await setWorkflow({ step: 'stopped', detail: error });
+    await setWorkflow({ step: 'stopped', detail: error, diagnostics: res?.ok === false ? res.diagnostics ?? null : null });
     return 'UNKNOWN';
   }
 
@@ -184,7 +184,7 @@ export async function approveAndConnect(prospectId: string, message: string) {
     x.outreachStatus = 'APPROVED';
   });
   await log('User approved outreach', { level: 'success', prospectId, campaignId: p.campaignId });
-  await setWorkflow({ prospectId, step: 'opening_profile', detail: `Opening ${p.name}'s profile…` });
+  await setWorkflow({ prospectId, step: 'opening_profile', detail: `Opening ${p.name}'s profile…`, diagnostics: null });
 
   let res: PrepareResponse;
   try {
@@ -225,6 +225,7 @@ export async function approveAndConnect(prospectId: string, message: string) {
   await setWorkflow({
     step: manual ? 'awaiting_final_confirmation' : 'stopped',
     detail: manual ? `${failure.error} A SyncUp panel on the LinkedIn page lets you copy the message and record the result.` : failure.error,
+    diagnostics: failure.diagnostics ?? null,
   });
   void syncNow();
 }

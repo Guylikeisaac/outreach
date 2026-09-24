@@ -255,3 +255,23 @@ export async function verifyPending(expectedName: string): Promise<boolean> {
   }
   return false;
 }
+
+/** Compact description of the profile page structure, for fixing selectors. */
+export function profileDiagnostics(): string {
+  const main = document.querySelector('main');
+  const card = findTopCard();
+  const scope = card?.root ?? main ?? document.body;
+  const controls = clickables(scope)
+    .filter(isVisible)
+    .map((b) => label(b).slice(0, 50))
+    .filter(Boolean)
+    .slice(0, 25);
+  const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], .artdeco-modal')].filter(isVisible);
+  return [
+    `url: ${location.pathname}`,
+    `main: ${!!main}, h1 in main: ${main?.querySelectorAll('h1').length ?? 0}, h1 total: ${document.querySelectorAll('h1').length}`,
+    `top card: ${card ? `found (<${card.root.tagName.toLowerCase()}>, name matched: ${!!card.name})` : 'NOT found'}`,
+    `controls: ${controls.join(' | ')}`,
+    `visible dialogs: ${dialogs.length}${dialogs.length ? ` → ${dialogs.map((d) => clickables(d).map(label).filter(Boolean).slice(0, 8).join(' | ')).join(' || ')}` : ''}`,
+  ].join('\n');
+}

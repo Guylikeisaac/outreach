@@ -157,3 +157,22 @@ export function useAction() {
   );
   return { busy, run };
 }
+
+/** Copies a page-structure summary so selector breakages can be reported and fixed. */
+export function CopyDiagnostics({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      title="Copies a short summary of the LinkedIn page structure (no post content) for fixing selectors"
+      onClick={async () => {
+        await navigator.clipboard.writeText(`SyncUp diagnostics v${chrome.runtime.getManifest?.().version ?? ''}\n${text}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+    >
+      {copied ? 'Copied' : 'Copy diagnostics'}
+    </Button>
+  );
+}

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { OUTREACH_STATUSES, type OutreachStatus, type Prospect } from '@shared/types';
 import { send, relativeDay, useStore } from '../hooks';
-import { Badge, Button, Card, ConnectionBadge, OutreachBadge, QualificationBadge, useAction } from './ui';
+import { Badge, Button, Card, ConnectionBadge, CopyDiagnostics, OutreachBadge, QualificationBadge, useAction } from './ui';
 import { ReviewSheet } from './ReviewSheet';
 
 const OPEN: OutreachStatus[] = ['NEW', 'REVIEWED', 'APPROVED'];
@@ -33,6 +33,11 @@ export function WorkflowBanner() {
           {p ? ` · ${p.name}` : ''}
         </div>
         <div className="mt-0.5 text-muted">{wf.detail}</div>
+        {wf.diagnostics && (
+          <div className="mt-1.5 -ml-3">
+            <CopyDiagnostics text={wf.diagnostics} />
+          </div>
+        )}
       </div>
       {!active && (
         <button className="text-dim hover:text-silver" onClick={() => send({ type: 'CANCEL_WORKFLOW' })} aria-label="Dismiss">

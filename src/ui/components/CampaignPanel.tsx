@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { TARGET_LOCATIONS, TARGET_ROLES, type Campaign, type TargetLocation, type TargetRole } from '@shared/types';
 import { PAGE_STRUCTURE_ERROR } from '@shared/messages';
 import { send, useStore } from '../hooks';
-import { Button, Card, Field, Spinner, inputCls, useAction } from './ui';
+import { Button, Card, CopyDiagnostics, Field, Spinner, inputCls, useAction } from './ui';
 
 const SUGGESTED_QUERIES = [
   'startup hiring Bengaluru',
@@ -139,6 +139,7 @@ export function CampaignPanel() {
               <Button size="sm" variant="ghost" onClick={() => send({ type: 'CLEAR_ERROR' })}>
                 Dismiss
               </Button>
+              {run.diagnostics && <CopyDiagnostics text={run.diagnostics} />}
             </div>
           </div>
         )}

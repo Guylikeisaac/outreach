@@ -36,7 +36,7 @@ export interface PingResponse {
   page: 'search' | 'feed' | 'profile' | 'post' | 'auth' | 'checkpoint' | 'other';
 }
 
-export type ScanResponse = { ok: true; posts: RawPost[]; truncated: boolean } | { ok: false; error: string };
+export type ScanResponse = { ok: true; posts: RawPost[]; truncated: boolean } | { ok: false; error: string; diagnostics?: string };
 
 export type DetectResponse =
   | {
@@ -47,7 +47,7 @@ export type DetectResponse =
       headline: string;
       via: string;
     }
-  | { ok: false; error: string; status: 'UNKNOWN' };
+  | { ok: false; error: string; status: 'UNKNOWN'; diagnostics?: string };
 
 export type PrepareResponse =
   | { ok: true; stage: 'awaiting_confirmation'; noteMaxLength: number | null }
@@ -56,6 +56,7 @@ export type PrepareResponse =
       stage: 'status_changed' | 'identity_mismatch' | 'no_connect' | 'no_dialog' | 'no_note' | 'too_long' | 'structure' | 'extra_verification';
       status?: ConnectionStatus;
       error: string;
+      diagnostics?: string;
     };
 
 // ── content script → background (unsolicited) ───────────────────────────────────────────────

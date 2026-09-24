@@ -145,7 +145,7 @@ async function handleUi(req: UiRequest): Promise<UiResponse> {
       return res.ok ? { ok: true } : { ok: false, error: res.error ?? 'Sync failed' };
     }
     case 'CLEAR_ERROR':
-      await setRun({ phase: 'idle', lastError: null });
+      await setRun({ phase: 'idle', lastError: null, diagnostics: null });
       return { ok: true };
   }
 }
