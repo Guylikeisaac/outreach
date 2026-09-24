@@ -11,7 +11,7 @@ import type { ConnectionStatus } from '@shared/types';
 import type { DetectResponse, PrepareResponse } from '@shared/messages';
 import { PAGE_STRUCTURE_ERROR } from '@shared/messages';
 import { normalizeProfileUrl } from '@shared/linkedin';
-import { clickables, findClickable, firstLine, isEnabled, isVisible, jitter, label, namesMatch, pageKind, sleep, text, waitFor } from './dom';
+import { clickables, deepQueryAll, findClickable, firstLine, isEnabled, isVisible, jitter, label, namesMatch, pageKind, sleep, text, waitFor } from './dom';
 import { agentClick, moveTo, setCursorLabel, typeVisibly } from './cursor';
 
 export interface TopCard {
@@ -95,7 +95,7 @@ function canonicalUrl(): string {
 const MENU_ITEM_SELECTOR = 'button, [role="button"], [role="menuitem"], [role="option"], a, li, [tabindex]';
 
 function visibleMenuItems(): Set<HTMLElement> {
-  return new Set([...document.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR)].filter(isVisible));
+  return new Set(deepQueryAll<HTMLElement>(MENU_ITEM_SELECTOR).filter(isVisible));
 }
 
 interface OpenMenu {
@@ -197,9 +197,27 @@ export async function detectConnection(expectedName: string): Promise<DetectResp
 
 export type NoteField = HTMLTextAreaElement | HTMLInputElement | HTMLElement;
 
+const INVITE_TEXT = /invitation|add a note|send without|personali[sz]e your invit|note/i;
+const INVITE_CONTROL = /^(?:Add a (?:free )?note|Send without a note|Send(?: invitation| now)?)$/i;
+
 export function findInviteDialog(): HTMLElement | null {
-  const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"], .artdeco-modal, dialog[open]')].filter(isVisible);
-  return dialogs.find((d) => /invitation|add a note|send without|personali[sz]e|note|connect/i.test(text(d))) ?? null;
+  // 1. A real dialog element (light DOM or shadow DOM).
+  const dialogs = deepQueryAll<HTMLElement>('[role="dialog"], [role="alertdialog"], [aria-modal="true"], .artdeco-modal, dialog[open]').filter(isVisible);
+  const byRole = dialogs.find((d) => INVITE_TEXT.test(text(d)) && clickables(d).some((b) => INVITE_CONTROL.test(label(b))));
+  if (byRole) return byRole;
+  const withField = dialogs.find((d) => INVITE_TEXT.test(text(d)) && d.querySelector('textarea, [contenteditable="true"]'));
+  if (withField) return withField;
+
+  // 2. No dialog role: anchor on the invitation's own buttons and take their smallest shared block.
+  const controls = deepQueryAll<HTMLElement>('button, [role="button"]').filter((b) => isVisible(b) && INVITE_CONTROL.test(label(b)));
+  for (const control of controls) {
+    for (let node = control.parentElement, i = 0; node && node !== document.body && i < 8; node = node.parentElement, i++) {
+      if (INVITE_TEXT.test(text(node)) && clickables(node).filter((b) => INVITE_CONTROL.test(label(b))).length >= 1 && text(node).length > 30) {
+        return node;
+      }
+    }
+  }
+  return null;
 }
 
 export function findNoteField(dialog: HTMLElement): NoteField | null {
@@ -223,7 +241,7 @@ function noteMaxLength(field: NoteField, dialog: HTMLElement): number | null {
 }
 
 /** Types the note so LinkedIn's own state sees it (works for textarea and rich-text fields). */
-async function writeNote(field: NoteField, message: string) {
+export async function writeNote(field: NoteField, message: string) {
   await moveTo(field);
   setCursorLabel('Writing note');
   field.focus();
@@ -343,7 +361,7 @@ export function profileDiagnostics(): string {
     .map((b) => label(b).slice(0, 50))
     .filter(Boolean)
     .slice(0, 25);
-  const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], .artdeco-modal, dialog[open]')].filter(isVisible);
+  const dialogs = deepQueryAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], .artdeco-modal, dialog[open]').filter(isVisible);
   return [
     `url: ${location.pathname}`,
     `title name: "${profileName()}", h1 in main: ${main?.querySelectorAll('h1').length ?? 0}`,

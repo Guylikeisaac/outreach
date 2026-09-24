@@ -31,7 +31,9 @@ export type ContentRequest =
   | { type: 'DETECT_CONNECTION'; expectedName: string }
   | { type: 'PREPARE_CONNECT'; prospectId: string; expectedName: string; message: string }
   /** Autopilot: connect → add note → write message → send → verify pending (user enabled Autopilot). */
-  | { type: 'AUTO_CONNECT'; expectedName: string; message: string };
+  | { type: 'AUTO_CONNECT'; expectedName: string; message: string }
+  /** Autopilot: message an existing 1st-degree connection from their profile. */
+  | { type: 'AUTO_MESSAGE'; expectedName: string; message: string };
 
 export interface PingResponse {
   ok: true;
@@ -61,6 +63,10 @@ export type PrepareResponse =
       error: string;
       diagnostics?: string;
     };
+
+export type AutoMessageResponse =
+  | { ok: true; verified: boolean }
+  | { ok: false; error: string; stage: 'structure' | 'identity_mismatch' | 'no_message_button' | 'no_composer'; diagnostics?: string };
 
 export type AutoConnectResponse =
   | { ok: true; verified: boolean; sentMessage: string }

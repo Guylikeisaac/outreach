@@ -5,7 +5,6 @@ import { Badge, Button, Card, ConnectionBadge, CopyDiagnostics, OutreachBadge, Q
 import { ReviewSheet } from './ReviewSheet';
 
 const OPEN: OutreachStatus[] = ['NEW', 'REVIEWED', 'APPROVED'];
-const LEVEL_RANK = { HIGH: 0, MEDIUM: 1, LOW: 2 } as const;
 
 type Filter = 'recommended' | 'in_progress' | 'all' | 'not_recommended';
 
@@ -200,7 +199,8 @@ export function ProspectList() {
           return true;
       }
     });
-    return f.sort((a, b) => LEVEL_RANK[a.qualification.level] - LEVEL_RANK[b.qualification.level] || b.createdAt.localeCompare(a.createdAt));
+    // Discovery order (top of the first search first) — the same order Autopilot works through.
+    return f.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }, [prospects, filter, onlyCampaign, activeId]);
 
   const tabs: [Filter, string][] = [

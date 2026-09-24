@@ -6,8 +6,8 @@
 //  - stops the whole run on sign-in walls, security checks, note limits, or repeated page-structure failures
 
 import type { Campaign, Prospect } from '@shared/types';
-import type { AutoConnectResponse } from '@shared/messages';
-import { validateMessage } from '@shared/message';
+import type { AutoConnectResponse, AutoMessageResponse } from '@shared/messages';
+import { DEFAULT_TEMPLATE, renderTemplate, validateMessage } from '@shared/message';
 import { get } from '@shared/storage';
 import { log, patchProspect } from './log';
 import { checkConnection, generateFor } from './outreach';
@@ -18,7 +18,6 @@ export const DEFAULT_DAILY_SEND_LIMIT = 15;
 export const MAX_DAILY_SEND_LIMIT = 40;
 
 const OPEN = ['NEW', 'REVIEWED', 'APPROVED'];
-const LEVEL_RANK = { HIGH: 0, MEDIUM: 1, LOW: 2 } as const;
 const localDay = (iso: string) => new Date(iso).toLocaleDateString('en-CA');
 
 export function sendLimit(c: Campaign): number {
@@ -27,22 +26,77 @@ export function sendLimit(c: Campaign): number {
 
 export async function sentToday(campaignId: string): Promise<number> {
   const today = localDay(new Date().toISOString());
-  return Object.values(await get('prospects')).filter((p) => p.campaignId === campaignId && p.requestSentAt && localDay(p.requestSentAt) === today).length;
+  return Object.values(await get('prospects')).filter(
+    (p) =>
+      p.campaignId === campaignId &&
+      ((p.requestSentAt && localDay(p.requestSentAt) === today) || (p.messageSentAt && localDay(p.messageSentAt) === today)),
+  ).length;
 }
 
+/** Existing connections that should get a direct message instead of a connection request. */
+function needsDirectMessage(p: Prospect): boolean {
+  return p.connectionStatus === 'CONNECTED' && !p.messageSentAt && !p.skippedByUser && !p.dmUnavailable && (OPEN.includes(p.outreachStatus) || p.outreachStatus === 'SKIPPED');
+}
+
+function needsConnectionRequest(p: Prospect): boolean {
+  return OPEN.includes(p.outreachStatus) && !p.skippedByUser && !['CONNECTED', 'PENDING', 'UNAVAILABLE'].includes(p.connectionStatus);
+}
+
+/** Qualified prospects in discovery order (top of the first search first), like the Prospects list. */
 function queueFor(prospects: Record<string, Prospect>, campaignId: string): Prospect[] {
   return Object.values(prospects)
-    .filter(
-      (p) =>
-        p.campaignId === campaignId &&
-        p.qualification.eligible &&
-        OPEN.includes(p.outreachStatus) &&
-        !['CONNECTED', 'PENDING', 'UNAVAILABLE'].includes(p.connectionStatus),
-    )
-    .sort((a, b) => LEVEL_RANK[a.qualification.level] - LEVEL_RANK[b.qualification.level] || b.createdAt.localeCompare(a.createdAt));
+    .filter((p) => p.campaignId === campaignId && p.qualification.eligible && (needsConnectionRequest(p) || needsDirectMessage(p)))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 class StopRun extends Error {}
+
+/** Sends the campaign message as a direct message to an existing connection. */
+async function sendDm(p: Prospect, campaign: Campaign): Promise<'sent' | 'failed' | 'structure'> {
+  const settings = await get('settings');
+  const message = renderTemplate(settings.messageTemplate || DEFAULT_TEMPLATE, p.firstName || '', p.hiringRole);
+  const errors = validateMessage(message, p.firstName).filter((x) => x.level === 'error');
+  if (!p.firstName || errors.length) {
+    await log(`Autopilot skipped messaging ${p.name}: ${errors[0]?.text ?? 'first name unknown'}`, { level: 'warn', prospectId: p.id, campaignId: campaign.id });
+    return 'failed';
+  }
+  let res: AutoMessageResponse;
+  try {
+    const tabId = await openInWorkTab(p.profileUrl);
+    res = await sendToTab<AutoMessageResponse>(tabId, { type: 'AUTO_MESSAGE', expectedName: p.name, message });
+  } catch (e) {
+    res = { ok: false, stage: 'structure', error: e instanceof Error ? e.message : String(e) };
+  }
+  if (res?.ok) {
+    const ts = new Date().toISOString();
+    await patchProspect(p.id, (x) => {
+      x.outreachStatus = 'MESSAGE_SENT';
+      x.messageSentAt = ts; // recorded even if unverified, so it is never sent twice
+      x.message = message;
+    });
+    await log(res.verified ? `Message sent to ${p.name} (already connected)` : `Message sent to ${p.name}, but it couldn't be confirmed in the thread — check it`, {
+      level: res.verified ? 'success' : 'warn',
+      prospectId: p.id,
+      campaignId: campaign.id,
+    });
+    void syncNow();
+    return 'sent';
+  }
+  const fail = res ?? { ok: false as const, stage: 'structure' as const, error: 'No response from the LinkedIn page.' };
+  await log(`Autopilot: couldn't message ${p.name} — ${fail.error}`, {
+    level: 'warn',
+    prospectId: p.id,
+    campaignId: campaign.id,
+    metadata: 'diagnostics' in fail && fail.diagnostics ? { diagnostics: fail.diagnostics } : {},
+  });
+  if (fail.stage === 'identity_mismatch' || fail.stage === 'no_message_button') {
+    await patchProspect(p.id, (x) => {
+      x.dmUnavailable = true;
+      x.outreachStatus = 'SKIPPED';
+    });
+  }
+  return fail.stage === 'structure' || fail.stage === 'no_composer' ? 'structure' : 'failed';
+}
 
 /**
  * Runs the Autopilot queue for a campaign. `shouldStop` is polled between every step so the
@@ -75,6 +129,11 @@ export async function runAutopilot(
       await new Promise((r) => setTimeout(r, 1000));
     }
   };
+  const pause = async () => {
+    const gap = 60_000 + Math.random() * 90_000;
+    await status(`Autopilot · next profile in ${Math.round(gap / 1000)}s (${sent}/${limit} sent today)`);
+    await wait(gap);
+  };
 
   try {
     for (const [i, queued] of queue.entries()) {
@@ -84,7 +143,7 @@ export async function runAutopilot(
         break;
       }
       const p = (await get('prospects'))[queued.id];
-      if (!p || !OPEN.includes(p.outreachStatus) || !p.qualification.eligible) continue;
+      if (!p || !p.qualification.eligible || !(needsConnectionRequest(p) || needsDirectMessage(p))) continue;
       await status(`Autopilot · ${p.name} (${sent}/${limit} sent today)`);
 
       // 1. Fresh connection status from the profile (Connect button or More → Connect).
@@ -96,7 +155,20 @@ export async function runAutopilot(
         if (/structure changed/i.test(wf.detail) && ++structureFailures >= 2) throw new StopRun(`${wf.detail} (twice in a row)`);
         continue;
       }
-      if (connection !== 'CONNECT_AVAILABLE') continue; // connected / pending / unavailable → already handled & logged
+
+      // Already connected → send the message as a direct message instead.
+      if (connection === 'CONNECTED') {
+        const fresh = (await get('prospects'))[p.id];
+        if (!fresh || !needsDirectMessage(fresh)) continue;
+        const outcome = await sendDm(fresh, campaign);
+        if (outcome === 'sent') {
+          sent++;
+          structureFailures = 0;
+        } else if (outcome === 'structure' && ++structureFailures >= 2) throw new StopRun('Messaging page not recognised twice in a row.');
+        if (i < queue.length - 1 && sent < limit) await pause();
+        continue;
+      }
+      if (connection !== 'CONNECT_AVAILABLE') continue; // pending / unavailable → already handled & logged
 
       // 2. Message from the campaign template.
       let message: string;
@@ -191,11 +263,7 @@ export async function runAutopilot(
       }
 
       // 4. Human-paced gap before the next profile.
-      if (i < queue.length - 1 && sent < limit) {
-        const gap = 60_000 + Math.random() * 90_000;
-        await status(`Autopilot · next profile in ${Math.round(gap / 1000)}s (${sent}/${limit} sent today)`);
-        await wait(gap);
-      }
+      if (i < queue.length - 1 && sent < limit) await pause();
     }
     await log(`Autopilot finished — ${sent}/${limit} sent today`, { level: 'success', campaignId: campaign.id });
   } catch (e) {

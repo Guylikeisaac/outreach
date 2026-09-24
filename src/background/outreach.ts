@@ -263,6 +263,7 @@ export async function setOutreachStatus(prospectId: string, status: OutreachStat
   if (status === 'APPROVED') throw new Error('Approve outreach from the message review screen.');
   await patchProspect(prospectId, (x) => {
     x.outreachStatus = status;
+    x.skippedByUser = status === 'SKIPPED';
     if (status === 'REQUEST_SUBMITTED') {
       x.connectionStatus = 'PENDING';
       x.requestSentAt ??= new Date().toISOString();

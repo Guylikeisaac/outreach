@@ -45,6 +45,17 @@ export async function waitFor<T>(fn: () => T | null | undefined | false, timeout
   return null;
 }
 
+/**
+ * querySelectorAll that also searches inside open shadow roots. LinkedIn renders some newer UI
+ * (e.g. the invitation modal and messaging) inside shadow DOM, which document.querySelectorAll can't see.
+ */
+export function deepQueryAll<T extends Element = HTMLElement>(selector: string, root: Document | ShadowRoot | Element = document): T[] {
+  const out: T[] = [...root.querySelectorAll<T>(selector)];
+  const hosts = [...root.querySelectorAll('*')].filter((el) => el.shadowRoot);
+  for (const host of hosts) out.push(...deepQueryAll<T>(selector, host.shadowRoot!));
+  return out;
+}
+
 export function clickables(root: ParentNode): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>('button, [role="button"], a[role="button"], [role="menuitem"]')];
 }

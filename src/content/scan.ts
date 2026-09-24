@@ -347,6 +347,8 @@ export async function scanPosts(
   scroll: boolean,
   onProgress: (found: number) => void,
 ): Promise<{ posts: RawPost[]; truncated: boolean } | null> {
+  // Always start reading from the top of the results.
+  window.scrollTo({ top: 0 });
   const appeared = await waitFor(() => findPostContainers().length > 0, 15000, 400);
   if (!appeared) {
     // A genuinely empty result page is valid (LinkedIn shows a visible "No results found" heading);

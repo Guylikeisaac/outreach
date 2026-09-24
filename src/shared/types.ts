@@ -86,6 +86,7 @@ export const OUTREACH_STATUSES = [
   'APPROVED',
   'REQUEST_SUBMITTED',
   'CONNECTED',
+  'MESSAGE_SENT',
   'REPLIED',
   'INTERESTED',
   'JD_REQUESTED',
@@ -138,6 +139,12 @@ export interface Prospect {
   message: string;
   /** When the connection request was submitted (used for daily send limits). */
   requestSentAt?: string | null;
+  /** When a direct message was sent to an existing connection. */
+  messageSentAt?: string | null;
+  /** True when the user skipped this prospect themselves (Autopilot never contacts them). */
+  skippedByUser?: boolean;
+  /** Direct message couldn't be sent (no Message button / profile mismatch) — don't retry automatically. */
+  dmUnavailable?: boolean;
   campaignId: string;
   createdAt: string;
   updatedAt: string;

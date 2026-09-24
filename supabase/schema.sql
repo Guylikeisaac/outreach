@@ -6,7 +6,7 @@ create extension if not exists pgcrypto;
 -- Pipeline statuses. Extend with: alter type outreach_status add value 'NEW_STAGE' after 'X';
 do $$ begin
   create type outreach_status as enum (
-    'NEW', 'REVIEWED', 'APPROVED', 'REQUEST_SUBMITTED', 'CONNECTED', 'REPLIED',
+    'NEW', 'REVIEWED', 'APPROVED', 'REQUEST_SUBMITTED', 'CONNECTED', 'MESSAGE_SENT', 'REPLIED',
     'INTERESTED', 'JD_REQUESTED', 'JD_RECEIVED', 'CANDIDATES_SENT', 'INTERVIEW', 'HIRED', 'SKIPPED'
   );
 exception when duplicate_object then null; end $$;
@@ -81,3 +81,6 @@ do $$ begin
   create policy "extension access" on activity_logs for select using (true);
   create policy "extension insert" on activity_logs for insert with check (true);
 exception when duplicate_object then null; end $$;
+
+-- Upgrading an existing database:
+-- alter type outreach_status add value if not exists 'MESSAGE_SENT' after 'CONNECTED';

@@ -8,6 +8,7 @@ import { scanDiagnostics, scanPosts } from './scan';
 import { detectConnection, findInviteDialog, findNoteField, findSendButton, noteValue, prepareConnect, profileDiagnostics, verifyPending } from './profile';
 import { removeOverlay, showOverlay } from './overlay';
 import { agentClick, hideCursor, setCursorLabel } from './cursor';
+import { sendDirectMessage } from './dm';
 
 declare global {
   interface Window {
@@ -187,6 +188,17 @@ async function handle(req: ContentRequest): Promise<unknown> {
       return handlePrepare(req);
     case 'AUTO_CONNECT':
       return handleAutoConnect(req);
+    case 'AUTO_MESSAGE': {
+      if (workflowActive) return { ok: false, stage: 'structure', error: 'A workflow is already open on this page.' };
+      workflowActive = true;
+      try {
+        const res = await sendDirectMessage(req.expectedName, req.message);
+        return res.ok ? res : { ...res, diagnostics: res.stage === 'structure' || res.stage === 'no_composer' ? profileDiagnostics() : undefined };
+      } finally {
+        workflowActive = false;
+        hideCursor();
+      }
+    }
   }
 }
 
