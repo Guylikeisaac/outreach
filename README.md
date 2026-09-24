@@ -128,3 +128,4 @@ Every selector lives in `src/content/scan.ts` and `src/content/profile.ts`. Each
 ## Responsible use
 
 LinkedIn's User Agreement restricts automated activity, and LinkedIn limits weekly invitations. Keep daily volumes modest, personalize, and stop if LinkedIn warns you. This tool is built to assist a person doing outreach by hand, not to replace them.
+# outreach
