@@ -7,7 +7,7 @@
 // returns a structure summary for debugging.
 
 import type { RawPost } from '@shared/types';
-import { firstLine, isVisible, jitter, text, waitFor } from './dom';
+import { firstLine, isVisible, jitter, sleep, text, waitFor } from './dom';
 
 const URN_RE = /urn(?::|%3A)li(?::|%3A)(activity|ugcPost|share)(?::|%3A)(\d{15,})/i;
 const AUTHOR_LINK = 'a[href*="/in/"], a[href*="/company/"], a[href*="/school/"], a[href*="/showcase/"]';
@@ -299,6 +299,47 @@ export function scanDiagnostics(): string {
   return out.join('\n');
 }
 
+// ── Scrolling / expansion ──────────────────────────────────────────────────────────────────
+
+/** Clicks the post's own "… more" text expander (never links or action buttons). Returns true if clicked. */
+function expandTruncatedText(container: HTMLElement): boolean {
+  const likes = likeControls(container);
+  for (const el of container.querySelectorAll<HTMLElement>('button, [role="button"], span, div')) {
+    const t = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (!/^(?:…|\.\.\.)?\s*(?:see |show )?more$/i.test(t)) continue;
+    if (el.closest('a[href]') || likes.some((l) => l.contains(el) || el.contains(l))) continue;
+    const target = (el.closest('button, [role="button"]') as HTMLElement | null) ?? el;
+    if (!isVisible(target)) continue;
+    target.click();
+    return true;
+  }
+  return false;
+}
+
+function scrollableAncestor(el: HTMLElement): HTMLElement | null {
+  for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+    const s = getComputedStyle(n);
+    if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 20) return n;
+  }
+  return null;
+}
+
+/** Brings the next batch of results in: scroll the last post into view (window or inner scroller), or press "Show more results". */
+function loadMore() {
+  const posts = findPostContainers();
+  const last = posts[posts.length - 1];
+  if (last) {
+    last.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const scroller = scrollableAncestor(last);
+    scroller?.scrollBy({ top: scroller.clientHeight * 0.9, behavior: 'smooth' });
+  }
+  window.scrollBy({ top: window.innerHeight * 0.9, behavior: 'smooth' });
+  const more = [...document.querySelectorAll<HTMLElement>('button, [role="button"]')].find(
+    (b) => isVisible(b) && /^(?:Show|See|Load) more results$/i.test((b.textContent ?? '').trim()),
+  );
+  more?.click();
+}
+
 // ── Public scan ────────────────────────────────────────────────────────────────────────────
 
 export async function scanPosts(
@@ -317,23 +358,30 @@ export async function scanPosts(
   }
 
   const seen = new Map<string, RawPost>();
-  const collect = () => {
+  const expanded = new WeakSet<HTMLElement>();
+  const collect = async () => {
     for (const c of findPostContainers()) {
+      if (!expanded.has(c)) {
+        expanded.add(c);
+        if (expandTruncatedText(c)) await sleep(250);
+      }
       const post = extractPost(c);
       if (!post) continue;
       const key = post.postUrl || `${post.authorUrl}|${post.postText.slice(0, 80)}`;
-      if (!seen.has(key)) seen.set(key, post);
+      // Keep the longest version (text may have been expanded after the first read).
+      const prev = seen.get(key);
+      if (!prev || post.postText.length > prev.postText.length) seen.set(key, post);
     }
   };
 
-  collect();
+  await collect();
   onProgress(seen.size);
   let stale = 0;
   while (scroll && seen.size < maxPosts && stale < 3) {
     const before = seen.size;
-    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+    loadMore();
     await jitter(1800, 3200); // human-paced; lets LinkedIn lazy-load the next batch
-    collect();
+    await collect();
     onProgress(seen.size);
     stale = seen.size === before ? stale + 1 : 0;
   }

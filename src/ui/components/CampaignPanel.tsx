@@ -4,18 +4,22 @@ import { PAGE_STRUCTURE_ERROR } from '@shared/messages';
 import { send, useStore } from '../hooks';
 import { Button, Card, CopyDiagnostics, Field, Spinner, inputCls, useAction } from './ui';
 
+// Exact-phrase, first-person queries find people hiring for their own team (not job boards).
 const SUGGESTED_QUERIES = [
-  'startup hiring Bengaluru',
-  'we are hiring India startup',
-  'founder hiring India',
-  'hiring software engineer India',
+  '"we are hiring" startup India',
+  '"we\'re hiring" Bengaluru',
+  '"I am hiring" India',
+  '"my team is hiring" India',
+  '"hiring" founder Bengaluru',
+  '"we are hiring" engineers Pune',
+  '"join our team" startup India',
 ];
 
 type Draft = Omit<Campaign, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
 
 const blank = (): Draft => ({
   name: 'Indian Startup Hiring',
-  searchQueries: ['startup hiring India'],
+  searchQueries: ['"we are hiring" startup India', '"I am hiring" India', '"we\'re hiring" Bengaluru'],
   targetRoles: ['Founders', 'Co-founders', 'Recruiters', 'Talent Acquisition', 'HR', 'Hiring Managers', 'CTOs'],
   targetLocations: ['India'],
   dailyTarget: 20,

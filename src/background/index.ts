@@ -30,7 +30,7 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   const starter: Campaign = {
     id: crypto.randomUUID(),
     name: 'Indian Startup Hiring',
-    searchQueries: ['startup hiring India'],
+    searchQueries: ['"we are hiring" startup India', '"I am hiring" India', '"we\'re hiring" Bengaluru'],
     targetRoles: ['Founders', 'Co-founders', 'Recruiters', 'Talent Acquisition', 'HR', 'Hiring Managers', 'CTOs'],
     targetLocations: ['India'],
     dailyTarget: 20,

@@ -79,8 +79,8 @@ export function dateFromRelativeTime(text: string, now = new Date()): Date | nul
 export function buildContentSearchUrl(query: string): string {
   const params = new URLSearchParams({
     keywords: query,
+    // Relevance (not "Latest") within the past week: "Latest" is dominated by job-board spam.
     datePosted: '"past-week"',
-    sortBy: '"date_posted"',
     origin: 'FACETED_SEARCH',
   });
   return `${LINKEDIN_ORIGIN}/search/results/content/?${params.toString()}`;
