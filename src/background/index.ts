@@ -10,6 +10,7 @@ import { log } from './log';
 import { requestStop, setRun, startDiscovery } from './discovery';
 import { approveAndConnect, cancelWorkflow, checkConnection, generateFor, onWorkflowEvent, saveMessage, setOutreachStatus } from './outreach';
 import { syncNow } from './sync';
+import { DEFAULT_DAILY_SEND_LIMIT, MAX_DAILY_SEND_LIMIT } from './autopilot';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
 
@@ -66,6 +67,8 @@ async function handleUi(req: UiRequest): Promise<UiResponse> {
           targetRoles: c.targetRoles,
           targetLocations: c.targetLocations.length ? c.targetLocations : ['India'],
           dailyTarget: Math.min(200, Math.max(1, Math.round(c.dailyTarget) || 20)),
+          autoSend: Boolean(c.autoSend),
+          dailySendLimit: Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, Math.round(c.dailySendLimit ?? DEFAULT_DAILY_SEND_LIMIT) || DEFAULT_DAILY_SEND_LIMIT)),
           createdAt: existing?.createdAt ?? ts,
           updatedAt: ts,
         };
@@ -93,11 +96,14 @@ async function handleUi(req: UiRequest): Promise<UiResponse> {
       await set('activeCampaignId', req.campaignId);
       return { ok: true };
     case 'START_DISCOVERY':
-    case 'SCAN_CURRENT_TAB': {
+    case 'SCAN_CURRENT_TAB':
+    case 'START_AUTOPILOT': {
       const run = await get('runState');
-      if (run.phase === 'running' || run.phase === 'stopping') throw new Error('Discovery is already running.');
+      if (run.phase === 'running' || run.phase === 'stopping') throw new Error('A run is already in progress.');
+      const campaign = (await get('campaigns'))[req.campaignId];
+      if (req.type === 'START_AUTOPILOT' && !campaign?.autoSend) throw new Error('Turn on Autopilot for this campaign first.');
       // Runs in the background; progress is reported through storage.
-      void startDiscovery(req.campaignId, req.type === 'START_DISCOVERY' ? 'search' : 'current_tab');
+      void startDiscovery(req.campaignId, req.type === 'START_DISCOVERY' ? 'search' : req.type === 'SCAN_CURRENT_TAB' ? 'current_tab' : 'autopilot');
       return { ok: true };
     }
     case 'STOP_DISCOVERY':

@@ -238,6 +238,7 @@ export async function onWorkflowEvent(ev: Extract<ContentEvent, { type: 'WORKFLO
       x.outreachStatus = 'REQUEST_SUBMITTED';
       x.connectionStatus = 'PENDING';
       x.connectionCheckedAt = new Date().toISOString();
+      x.requestSentAt = x.connectionCheckedAt;
       if (ev.finalMessage) x.message = ev.finalMessage;
     });
     await log(`Connection request submitted to ${p.name}`, { level: 'success', prospectId: p.id, campaignId: p.campaignId, metadata: { detail: ev.detail } });
@@ -262,7 +263,10 @@ export async function setOutreachStatus(prospectId: string, status: OutreachStat
   if (status === 'APPROVED') throw new Error('Approve outreach from the message review screen.');
   await patchProspect(prospectId, (x) => {
     x.outreachStatus = status;
-    if (status === 'REQUEST_SUBMITTED') x.connectionStatus = 'PENDING';
+    if (status === 'REQUEST_SUBMITTED') {
+      x.connectionStatus = 'PENDING';
+      x.requestSentAt ??= new Date().toISOString();
+    }
     if (status === 'CONNECTED' || status === 'REPLIED') x.connectionStatus = 'CONNECTED';
   });
   await log(`${p.name}: status set to ${status.replace(/_/g, ' ')}`, { prospectId, campaignId: p.campaignId });

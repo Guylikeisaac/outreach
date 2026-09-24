@@ -39,6 +39,23 @@ On first install the extension creates the **Indian Startup Hiring** campaign (`
 | Track | **Pipeline** / card Status menu | Funnel: hiring posts → qualified → sent → connected → replied → JD → candidates → interview → hired. |
 | Audit | **Activity** | A timestamped log of everything the extension did. |
 
+## Autopilot
+
+Turn on **Autopilot** in a campaign to send connection requests without a per-person confirmation. After discovery (or via **SEND NOW** for prospects already found), for each qualified prospect SyncUp:
+
+1. Opens the profile and re-checks the connection status. Connected, pending, unavailable, and already-contacted people are skipped.
+2. Clicks **Connect**, or **More → Connect** when Connect isn't shown directly.
+3. Clicks **Add a note** and writes your message from **Settings → Connection message**, with `{first_name}` filled in.
+4. Clicks **Send**, then checks that LinkedIn shows "Pending" and records `REQUEST_SUBMITTED`, so the person is never contacted twice.
+
+Guardrails:
+
+- A daily send limit per campaign (default 15, max 40), with a random 60–150 s gap between sends.
+- Only HIGH and MEDIUM prospects are contacted.
+- The run stops on a sign-in wall, a security check, LinkedIn's note limit (it won't send without your note), a note that's too long, or two page-structure failures in a row.
+
+LinkedIn restricts accounts that send many automated invites. Keep the limit modest.
+
 ## Safety model
 
 - **Human in the loop, twice.** You approve in the dashboard and confirm again on LinkedIn. The background never submits anything silently.

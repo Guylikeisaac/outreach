@@ -8,6 +8,7 @@ export type UiRequest =
   | { type: 'DELETE_CAMPAIGN'; campaignId: string }
   | { type: 'SET_ACTIVE_CAMPAIGN'; campaignId: string }
   | { type: 'START_DISCOVERY'; campaignId: string }
+  | { type: 'START_AUTOPILOT'; campaignId: string }
   | { type: 'SCAN_CURRENT_TAB'; campaignId: string }
   | { type: 'STOP_DISCOVERY' }
   | { type: 'CHECK_CONNECTION'; prospectId: string }
@@ -28,7 +29,9 @@ export type ContentRequest =
   | { type: 'PING' }
   | { type: 'SCAN_POSTS'; maxPosts: number; scroll: boolean }
   | { type: 'DETECT_CONNECTION'; expectedName: string }
-  | { type: 'PREPARE_CONNECT'; prospectId: string; expectedName: string; message: string };
+  | { type: 'PREPARE_CONNECT'; prospectId: string; expectedName: string; message: string }
+  /** Autopilot: connect → add note → write message → send → verify pending (user enabled Autopilot). */
+  | { type: 'AUTO_CONNECT'; expectedName: string; message: string };
 
 export interface PingResponse {
   ok: true;
@@ -58,6 +61,10 @@ export type PrepareResponse =
       error: string;
       diagnostics?: string;
     };
+
+export type AutoConnectResponse =
+  | { ok: true; verified: boolean; sentMessage: string }
+  | Extract<PrepareResponse, { ok: false }>;
 
 // ── content script → background (unsolicited) ───────────────────────────────────────────────
 export type ContentEvent =

@@ -34,6 +34,10 @@ export interface Campaign {
   targetRoles: TargetRole[];
   targetLocations: TargetLocation[];
   dailyTarget: number;
+  /** Autopilot: after discovery, send connection requests with the note automatically. */
+  autoSend?: boolean;
+  /** Max connection requests Autopilot sends per day for this campaign. */
+  dailySendLimit?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -132,6 +136,8 @@ export interface Prospect {
   connectionCheckedAt: string | null;
   outreachStatus: OutreachStatus;
   message: string;
+  /** When the connection request was submitted (used for daily send limits). */
+  requestSentAt?: string | null;
   campaignId: string;
   createdAt: string;
   updatedAt: string;

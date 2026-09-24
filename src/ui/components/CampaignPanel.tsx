@@ -19,6 +19,8 @@ const blank = (): Draft => ({
   targetRoles: ['Founders', 'Co-founders', 'Recruiters', 'Talent Acquisition', 'HR', 'Hiring Managers', 'CTOs'],
   targetLocations: ['India'],
   dailyTarget: 20,
+  autoSend: false,
+  dailySendLimit: 15,
 });
 
 function Chip({ on, children, onClick }: { on: boolean; children: string; onClick: () => void }) {
@@ -73,6 +75,15 @@ export function CampaignPanel() {
     [prospects, activeId, today],
   );
 
+  const sentToday = useMemo(
+    () =>
+      Object.values(prospects).filter(
+        (p) => p.campaignId === activeId && p.requestSentAt && new Date(p.requestSentAt).toLocaleDateString('en-CA') === today,
+      ).length,
+    [prospects, activeId, today],
+  );
+  const sendLimit = draft.dailySendLimit ?? 15;
+
   const running = run.phase === 'running' || run.phase === 'stopping';
 
   const save = async () => {
@@ -81,14 +92,15 @@ export function CampaignPanel() {
     return saved;
   };
 
-  const start = async (mode: 'search' | 'tab') => {
+  const start = async (mode: 'search' | 'tab' | 'autopilot') => {
     let id = draft.id;
     if (dirty || !id) {
       const saved = await save();
       if (!saved) return;
       id = saved.id;
     }
-    await act(mode, () => send({ type: mode === 'search' ? 'START_DISCOVERY' : 'SCAN_CURRENT_TAB', campaignId: id! }));
+    const type = mode === 'search' ? 'START_DISCOVERY' : mode === 'tab' ? 'SCAN_CURRENT_TAB' : 'START_AUTOPILOT';
+    await act(mode, () => send({ type, campaignId: id! }));
   };
 
   const target = Math.max(1, draft.dailyTarget || 1);
@@ -105,6 +117,11 @@ export function CampaignPanel() {
               {qualifiedToday}
               <span className="text-base text-dim"> / {draft.dailyTarget} qualified</span>
             </div>
+            {draft.autoSend && (
+              <div className="mt-0.5 text-xs tabular-nums text-gold-2">
+                {sentToday} / {sendLimit} requests sent · Autopilot on
+              </div>
+            )}
           </div>
           <div className="text-right text-[11px] text-muted">
             {running ? (
@@ -164,6 +181,17 @@ export function CampaignPanel() {
           >
             SCAN TAB
           </Button>
+          {draft.autoSend && !running && (
+            <Button
+              variant="secondary"
+              className="col-span-2"
+              title="Send requests to qualified prospects already found, without searching again"
+              onClick={() => start('autopilot')}
+              busy={busy === 'autopilot'}
+            >
+              SEND NOW · {Math.max(0, sendLimit - sentToday)} left today
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -269,6 +297,39 @@ export function CampaignPanel() {
             <span className="w-24 text-right text-sm tabular-nums text-silver">{draft.dailyTarget} / day</span>
           </div>
         </Field>
+
+        <div className={`space-y-3 rounded-2xl border p-3.5 ${draft.autoSend ? 'border-gold/40 bg-gold/5' : 'border-line-2 bg-panel-2'}`}>
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-[#d4af6a]"
+              checked={!!draft.autoSend}
+              onChange={(e) => patch({ autoSend: e.target.checked })}
+            />
+            <span>
+              <span className="block text-sm font-semibold">Autopilot</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-muted">
+                After discovery, SyncUp opens each qualified prospect, clicks Connect (or More → Connect), adds your note from Settings and sends it — no
+                confirmation per person. Connected, pending and already-contacted people are skipped.
+              </span>
+            </span>
+          </label>
+          {draft.autoSend && (
+            <Field label="Daily send limit" hint="Sends are spaced 1–2.5 minutes apart. LinkedIn restricts accounts that send too many invites — stay modest.">
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={1}
+                  max={40}
+                  value={sendLimit}
+                  onChange={(e) => patch({ dailySendLimit: Number(e.target.value) })}
+                  className="flex-1 accent-[#d4af6a]"
+                />
+                <span className="w-24 text-right text-sm tabular-nums text-silver">{sendLimit} / day</span>
+              </div>
+            </Field>
+          )}
+        </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-line pt-4">
           {draft.id && Object.keys(campaigns).length > 1 ? (

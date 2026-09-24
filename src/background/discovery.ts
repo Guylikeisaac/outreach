@@ -9,6 +9,7 @@ import { get, update, withLock } from '@shared/storage';
 import { log, saveProspect } from './log';
 import { activeLinkedInTab, openInWorkTab, sendToTab, useTabAsWorkTab, waitForContentScript } from './tabs';
 import { syncNow } from './sync';
+import { runAutopilot, sentToday } from './autopilot';
 
 let stopRequested = false;
 let targetReached = false;
@@ -37,23 +38,34 @@ class SafeStop extends Error {
   }
 }
 
-export async function startDiscovery(campaignId: string, mode: 'search' | 'current_tab') {
+export async function startDiscovery(campaignId: string, mode: 'search' | 'current_tab' | 'autopilot') {
   const run = await get('runState');
-  if (run.phase === 'running' || run.phase === 'stopping') throw new Error('Discovery is already running.');
+  if (run.phase === 'running' || run.phase === 'stopping') throw new Error('A run is already in progress.');
   const campaign = (await get('campaigns'))[campaignId];
   if (!campaign) throw new Error('Campaign not found.');
   if (mode === 'search' && !campaign.searchQueries.length) throw new Error('Add at least one search query.');
+  if (mode === 'autopilot' && !campaign.autoSend) throw new Error('Turn on Autopilot for this campaign first.');
 
   stopRequested = false;
   targetReached = false;
-  await setRun({ phase: 'running', campaignId, currentQuery: '', scanned: 0, added: 0, lastError: null, diagnostics: null, message: 'Starting discovery…' });
-  await log(mode === 'search' ? `Discovery started — ${campaign.searchQueries.length} search(es)` : 'Scanning current LinkedIn page', {
+  await setRun({
+    phase: 'running',
     campaignId,
-    metadata: { queries: campaign.searchQueries },
+    currentQuery: '',
+    scanned: 0,
+    added: 0,
+    lastError: null,
+    diagnostics: null,
+    message: mode === 'autopilot' ? 'Starting Autopilot…' : 'Starting discovery…',
   });
+  if (mode !== 'autopilot')
+    await log(mode === 'search' ? `Discovery started — ${campaign.searchQueries.length} search(es)` : 'Scanning current LinkedIn page', {
+      campaignId,
+      metadata: { queries: campaign.searchQueries },
+    });
 
   try {
-    const queries = mode === 'search' ? campaign.searchQueries : ['current page'];
+    const queries = mode === 'search' ? campaign.searchQueries : mode === 'current_tab' ? ['current page'] : [];
     for (const query of queries) {
       if (stopRequested || targetReached) break;
       const have = await qualifiedToday(campaign);
@@ -84,16 +96,28 @@ export async function startDiscovery(campaignId: string, mode: 'search' | 'curre
       await new Promise((r) => setTimeout(r, 2500 + Math.random() * 2500)); // human-paced between searches
     }
     const r = await get('runState');
-    await setRun({ phase: 'idle', message: stopRequested ? 'Stopped by you' : `Done — ${r.added} new prospect(s)` });
-    await log(stopRequested ? 'Discovery stopped by user' : `Discovery finished — ${r.added} new prospect(s)`, {
-      level: stopRequested ? 'warn' : 'success',
-      campaignId,
+    if (mode !== 'autopilot')
+      await log(stopRequested ? 'Discovery stopped by user' : `Discovery finished — ${r.added} new prospect(s)`, {
+        level: stopRequested ? 'warn' : 'success',
+        campaignId,
+      });
+
+    // Autopilot (enabled per campaign by the user): send connection requests with the note.
+    if (!stopRequested && campaign.autoSend) {
+      const fresh = (await get('campaigns'))[campaignId] ?? campaign;
+      await runAutopilot(fresh, () => stopRequested, (message) => setRun({ message }));
+    }
+
+    const sent = await sentToday(campaignId);
+    await setRun({
+      phase: 'idle',
+      message: stopRequested ? 'Stopped by you' : campaign.autoSend ? `Done — ${r.added} new, ${sent} sent today` : `Done — ${r.added} new prospect(s)`,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const diagnostics = e instanceof SafeStop ? e.diagnostics : null;
     await setRun({ phase: 'error', lastError: msg, diagnostics, message: 'Stopped safely' });
-    await log(`Discovery stopped: ${msg}`, { level: 'error', campaignId, metadata: diagnostics ? { diagnostics } : {} });
+    await log(`Run stopped: ${msg}`,{ level: 'error', campaignId, metadata: diagnostics ? { diagnostics } : {} });
   } finally {
     stopRequested = false;
     void syncNow();

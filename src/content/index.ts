@@ -1,9 +1,9 @@
 // SyncUp content script (www.linkedin.com only). Passive until the background worker asks it to do
 // something; every action is scoped, verified, and stops safely when the page isn't recognized.
 
-import type { ContentEvent, ContentRequest, PingResponse, PrepareResponse, ScanResponse } from '@shared/messages';
+import type { AutoConnectResponse, ContentEvent, ContentRequest, PingResponse, PrepareResponse, ScanResponse } from '@shared/messages';
 import { PAGE_STRUCTURE_ERROR } from '@shared/messages';
-import { pageKind, sleep, waitFor } from './dom';
+import { jitter, pageKind, sleep, waitFor } from './dom';
 import { scanDiagnostics, scanPosts } from './scan';
 import { detectConnection, findInviteDialog, findNoteField, findSendButton, noteValue, prepareConnect, profileDiagnostics, verifyPending } from './profile';
 import { removeOverlay, showOverlay } from './overlay';
@@ -121,6 +121,48 @@ async function handlePrepare(req: Extract<ContentRequest, { type: 'PREPARE_CONNE
   return { ok: true, stage: 'awaiting_confirmation', noteMaxLength: res.noteMaxLength };
 }
 
+/** Closes LinkedIn's invite dialog without sending (Dismiss / Close / Escape). */
+function closeInviteDialog() {
+  const dialog = findInviteDialog();
+  if (!dialog) return;
+  const close = dialog.querySelector<HTMLElement>('button[aria-label="Dismiss"], button[aria-label="Close"], button[aria-label*="Dismiss"]');
+  if (close) close.click();
+  else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+}
+
+/**
+ * Autopilot send (the user enabled Autopilot for the campaign): the same verified steps as the
+ * assisted flow — Connect (or More → Connect) → Add a note → write message — then LinkedIn's Send.
+ * Anything unexpected closes the dialog without sending.
+ */
+async function handleAutoConnect(req: Extract<ContentRequest, { type: 'AUTO_CONNECT' }>): Promise<AutoConnectResponse> {
+  if (workflowActive) return { ok: false, stage: 'structure', error: 'A connection workflow is already open on this page.' };
+  workflowActive = true;
+  try {
+    const res = await prepareConnect(req.expectedName, req.message);
+    if (!res.ok) {
+      const diagnostics = res.stage === 'structure' || res.stage === 'no_dialog' ? profileDiagnostics() : undefined;
+      closeInviteDialog();
+      return { ok: false, stage: res.stage, status: res.status, error: res.error, diagnostics };
+    }
+    await jitter(900, 1800);
+    const dialog = findInviteDialog();
+    const field = dialog ? findNoteField(dialog) : null;
+    const send = dialog ? findSendButton(dialog) : null;
+    const sentMessage = field ? noteValue(field) : '';
+    if (!dialog || !field || sentMessage.trim() !== req.message.trim() || !send) {
+      closeInviteDialog();
+      return { ok: false, stage: 'structure', error: `${PAGE_STRUCTURE_ERROR} (Send button or note not found — nothing sent.)`, diagnostics: profileDiagnostics() };
+    }
+    send.click();
+    await waitFor(() => !findInviteDialog(), 8000);
+    const verified = await verifyPending(req.expectedName);
+    return { ok: true, verified, sentMessage };
+  } finally {
+    workflowActive = false;
+  }
+}
+
 async function handle(req: ContentRequest): Promise<unknown> {
   const kind = pageKind();
   if (req.type === 'PING') return { ok: true, url: location.href, page: kind } satisfies PingResponse;
@@ -139,6 +181,8 @@ async function handle(req: ContentRequest): Promise<unknown> {
     }
     case 'PREPARE_CONNECT':
       return handlePrepare(req);
+    case 'AUTO_CONNECT':
+      return handleAutoConnect(req);
   }
 }
 
