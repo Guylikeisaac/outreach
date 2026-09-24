@@ -12,6 +12,7 @@ import type { DetectResponse, PrepareResponse } from '@shared/messages';
 import { PAGE_STRUCTURE_ERROR } from '@shared/messages';
 import { normalizeProfileUrl } from '@shared/linkedin';
 import { clickables, findClickable, firstLine, isEnabled, isVisible, jitter, label, namesMatch, pageKind, sleep, text, waitFor } from './dom';
+import { agentClick, moveTo, setCursorLabel, typeVisibly } from './cursor';
 
 export interface TopCard {
   root: HTMLElement;
@@ -107,7 +108,7 @@ async function openMoreMenu(root: HTMLElement): Promise<OpenMenu | null> {
   const more = findClickable(root, (l) => MORE_LABEL.test(l));
   if (!more) return null;
   const before = visibleMenuItems();
-  more.click();
+  await agentClick(more, 'More');
   const items = await waitFor(() => {
     const fresh = [...visibleMenuItems()].filter((el) => !before.has(el) && label(el));
     return fresh.length ? fresh : null;
@@ -223,21 +224,32 @@ function noteMaxLength(field: NoteField, dialog: HTMLElement): number | null {
 
 /** Types the note so LinkedIn's own state sees it (works for textarea and rich-text fields). */
 async function writeNote(field: NoteField, message: string) {
+  await moveTo(field);
+  setCursorLabel('Writing note');
   field.focus();
   if (field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) {
     const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(field, message);
-    field.dispatchEvent(new Event('input', { bubbles: true }));
+    const setValue = (v: string) => {
+      Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(field, v);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    await typeVisibly(message, setValue); // visible, human-paced typing
+    setValue(message);
     field.dispatchEvent(new Event('change', { bubbles: true }));
     return;
   }
-  // contenteditable: select existing content and insert as a real edit.
+  // contenteditable: clear, then insert as real edits in visible chunks.
   const sel = window.getSelection();
   const range = document.createRange();
   range.selectNodeContents(field);
   sel?.removeAllRanges();
   sel?.addRange(range);
-  document.execCommand('insertText', false, message);
+  document.execCommand('delete', false);
+  let typed = '';
+  await typeVisibly(message, (soFar) => {
+    document.execCommand('insertText', false, soFar.slice(typed.length));
+    typed = soFar;
+  });
   await sleep(100);
   if (noteValue(field).trim() !== message.trim()) {
     field.textContent = message;
@@ -265,7 +277,7 @@ export async function prepareConnect(expectedName: string, message: string): Pro
     return { ok: false, stage: 'status_changed', status: read.status, error: `Connection status is ${read.status}. Nothing was sent.` };
 
   await jitter(500, 1100);
-  read.connectEl.click();
+  await agentClick(read.connectEl, 'Connect');
 
   const dialog = await waitFor(findInviteDialog, 7000);
   if (!dialog) {
@@ -288,7 +300,7 @@ export async function prepareConnect(expectedName: string, message: string): Pro
     const addNote = findClickable(dialog, (l) => /^Add a (?:free )?note$/i.test(l));
     if (!addNote) return { ok: false, stage: 'no_note', error: 'LinkedIn did not offer "Add a note".' };
     await jitter(400, 900);
-    addNote.click();
+    await agentClick(addNote, 'Add a note');
     field = await waitFor(() => {
       const d = findInviteDialog();
       return d ? findNoteField(d) : null;

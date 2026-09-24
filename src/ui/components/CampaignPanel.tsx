@@ -130,7 +130,7 @@ export function CampaignPanel() {
           <div className="text-right text-[11px] text-muted">
             {running ? (
               <span className="inline-flex items-center gap-1.5 text-gold-2">
-                <span className="animate-pulse-dot h-1.5 w-1.5 rounded-full bg-gold" /> {run.phase === 'stopping' ? 'Stopping' : 'Discovering'}
+                <span className="animate-pulse-dot h-1.5 w-1.5 rounded-full bg-gold" /> {run.phase === 'stopping' ? 'Stopping' : run.message.startsWith('Autopilot') ? 'Autopilot running' : 'Discovering'}
               </span>
             ) : (
               <span>{run.message || 'Ready'}</span>
@@ -171,7 +171,7 @@ export function CampaignPanel() {
             </Button>
           ) : (
             <Button variant="primary" size="lg" onClick={() => start('search')} busy={busy === 'search' || busy === 'save'}>
-              START DISCOVERY
+              {draft.autoSend ? 'START AUTOPILOT' : 'START DISCOVERY'}
             </Button>
           )}
           <Button

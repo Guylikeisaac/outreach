@@ -7,6 +7,7 @@ import { jitter, pageKind, sleep, waitFor } from './dom';
 import { scanDiagnostics, scanPosts } from './scan';
 import { detectConnection, findInviteDialog, findNoteField, findSendButton, noteValue, prepareConnect, profileDiagnostics, verifyPending } from './profile';
 import { removeOverlay, showOverlay } from './overlay';
+import { agentClick, hideCursor, setCursorLabel } from './cursor';
 
 declare global {
   interface Window {
@@ -82,7 +83,7 @@ async function handlePrepare(req: Extract<ContentRequest, { type: 'PREPARE_CONNE
       const finalMessage = noteValue(liveField);
       panel.setInfo('Submitting…');
       observer.disconnect(); // we handle completion ourselves from here
-      send.click();
+      await agentClick(send, 'Send');
       await waitFor(() => !findInviteDialog(), 8000);
       const verified = await verifyPending(req.expectedName);
       finish({
@@ -154,12 +155,15 @@ async function handleAutoConnect(req: Extract<ContentRequest, { type: 'AUTO_CONN
       closeInviteDialog();
       return { ok: false, stage: 'structure', error: `${PAGE_STRUCTURE_ERROR} (Send button or note not found — nothing sent.)`, diagnostics: profileDiagnostics() };
     }
-    send.click();
+    await agentClick(send, 'Send');
     await waitFor(() => !findInviteDialog(), 8000);
     const verified = await verifyPending(req.expectedName);
+    setCursorLabel(verified ? 'Sent ✓' : 'Sent');
+    await sleep(1200);
     return { ok: true, verified, sentMessage };
   } finally {
     workflowActive = false;
+    hideCursor();
   }
 }
 
