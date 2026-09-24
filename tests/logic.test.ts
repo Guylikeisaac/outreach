@@ -9,7 +9,7 @@ import {
   identifyHiringContact,
 } from '../src/shared/extraction';
 import { qualify } from '../src/shared/qualification';
-import { DEFAULT_TEMPLATE, generateMessage, LINKEDIN_NOTE_LIMIT, renderTemplate, templateIssues, validateMessage } from '../src/shared/message';
+import { DEFAULT_TEMPLATE, LEGACY_TEMPLATE, LINKEDIN_NOTE_LIMIT, personalizationLine, renderTemplate, templateIssues, validateMessage } from '../src/shared/message';
 import { buildProspect } from '../src/shared/pipeline';
 import { dateFromActivityId, dateFromRelativeTime, normalizeProfileUrl } from '../src/shared/linkedin';
 
@@ -177,33 +177,31 @@ describe('qualification', () => {
 });
 
 describe('message', () => {
-  it('personalizes only with the extracted role', () => {
-    const m = generateMessage('Rahul', 'Senior Backend Engineer');
-    expect(m).toBe(
-      "Rahul, not selling anything 😄\nSaw you're hiring a Senior Backend Engineer.\nWe’re building SyncUp, India’s own LinkedIn.\nEarly days, so everything’s free.\nIf you’re hiring, share a JD and support us while we build for India!\nWe’ll send pre-screened candidates.",
-    );
-    expect(m.length).toBeLessThanOrEqual(LINKEDIN_NOTE_LIMIT);
+  it('default is a short greeting with the first name', () => {
+    expect(DEFAULT_TEMPLATE).toBe('Hi {first_name}');
+    expect(renderTemplate(DEFAULT_TEMPLATE, 'Pravin', 'Backend Engineer')).toBe('Hi Pravin');
+    expect(templateIssues(DEFAULT_TEMPLATE)).toEqual([]);
   });
-  it('base message when no role', () => {
-    expect(generateMessage('Rahul', '').startsWith('Rahul, Not selling anything 😄\nWe’re building')).toBe(true);
+  it('personalization line uses only the extracted role, with correct articles', () => {
+    expect(personalizationLine('Senior Backend Engineer')).toBe("Saw you're hiring a Senior Backend Engineer.");
+    expect(personalizationLine('SDE-2')).toBe("Saw you're hiring an SDE-2.");
+    expect(personalizationLine('Backend Engineers')).toBe("Saw you're hiring Backend Engineers.");
+    expect(personalizationLine('UX Designer')).toBe("Saw you're hiring a UX Designer.");
+    expect(personalizationLine('')).toBe('');
   });
-  it('articles', () => {
-    expect(generateMessage('A', 'SDE-2')).toContain("hiring an SDE-2.");
-    expect(generateMessage('A', 'Backend Engineers')).toContain("hiring Backend Engineers.");
-    expect(generateMessage('A', 'UX Designer')).toContain("hiring a UX Designer.");
-  });
-  it('validation', () => {
+  it('enforces the 200-character limit', () => {
+    expect(LINKEDIN_NOTE_LIMIT).toBe(200);
+    expect(validateMessage('x'.repeat(201), 'x').some((i) => i.level === 'error')).toBe(true);
     expect(validateMessage('[First Name], hi', '').some((i) => i.level === 'error')).toBe(true);
-    expect(validateMessage('x'.repeat(301), 'x').some((i) => i.level === 'error')).toBe(true);
+    expect(templateIssues(LEGACY_TEMPLATE).some((i) => /Too long/.test(i))).toBe(true);
+  });
+  it('drops the hiring line rather than exceed the limit', () => {
+    const t = `{first_name}, ${'x'.repeat(170)}\n{hiring_line}`;
+    expect(renderTemplate(t, 'Rahul', 'Senior Backend Engineer')).not.toContain('Saw you');
   });
 });
 
 describe('message template', () => {
-  it('default template matches the built-in message', () => {
-    expect(renderTemplate(DEFAULT_TEMPLATE, 'Rahul', 'Senior Backend Engineer')).toBe(generateMessage('Rahul', 'Senior Backend Engineer'));
-    expect(renderTemplate(DEFAULT_TEMPLATE, 'Rahul', '')).not.toContain('{hiring_line}');
-    expect(renderTemplate(DEFAULT_TEMPLATE, 'Rahul', '')).toContain('Rahul, not selling anything 😄\nWe’re building');
-  });
   it('custom template replaces the name', () => {
     const t = 'Hi {first_name}, this is Shruti from SyncUp 👋\n{hiring_line}\nWould love to connect!';
     expect(renderTemplate(t, 'Sreeja', '')).toBe('Hi Sreeja, this is Shruti from SyncUp 👋\nWould love to connect!');
@@ -212,6 +210,5 @@ describe('message template', () => {
   it('flags missing name token and unknown tokens', () => {
     expect(templateIssues('Hi Shruti, hello')).toHaveLength(1);
     expect(templateIssues('Hi {first_name} {company}')[0]).toMatch(/Unknown/);
-    expect(templateIssues(DEFAULT_TEMPLATE)).toEqual([]);
   });
 });

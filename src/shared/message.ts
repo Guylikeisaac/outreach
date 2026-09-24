@@ -1,7 +1,8 @@
 // SyncUp outreach message generation. The template is fixed; the only personalization is a single
 // line built from the hiring role that was actually extracted from the prospect's post.
 
-export const LINKEDIN_NOTE_LIMIT = 300;
+/** Kept at 200 so notes fit free LinkedIn accounts too (Premium allows 300). */
+export const LINKEDIN_NOTE_LIMIT = 200;
 
 const BODY = [
   'We’re building SyncUp, India’s own LinkedIn.',
@@ -22,10 +23,13 @@ function article(role: string): string {
 }
 
 /**
- * Default template. Tokens: {first_name} (required) and {hiring_line} (the "Saw you're hiring…"
- * line, or removed when no role was found in the post).
+ * Default template: a short greeting. Tokens: {first_name} (required) and optional {hiring_line}
+ * (the "Saw you're hiring…" line, removed when no role was found in the post).
  */
-export const DEFAULT_TEMPLATE = [
+export const DEFAULT_TEMPLATE = 'Hi {first_name}';
+
+/** The original long SyncUp pitch (≈260 chars — over the 200 limit); kept as a reference/preset. */
+export const LEGACY_TEMPLATE = [
   '{first_name}, not selling anything 😄',
   '{hiring_line}',
   ...BODY,
@@ -85,9 +89,7 @@ export function validateMessage(message: string, firstName: string): MessageIssu
   if (!message.trim()) issues.push({ level: 'error', text: 'Message is empty.' });
   if (/\[first name\]/i.test(message)) issues.push({ level: 'error', text: 'Replace the [First Name] placeholder.' });
   if (message.length > LINKEDIN_NOTE_LIMIT)
-    issues.push({ level: 'error', text: `LinkedIn notes are limited to ${LINKEDIN_NOTE_LIMIT} characters.` });
-  else if (message.length > 200)
-    issues.push({ level: 'warn', text: 'Some free LinkedIn accounts cap notes at 200 characters — the page limit is checked before inserting.' });
+    issues.push({ level: 'error', text: `Keep the message under ${LINKEDIN_NOTE_LIMIT} characters (it is ${message.length}).` });
   if (firstName && !message.includes(firstName)) issues.push({ level: 'warn', text: `Message doesn't address ${firstName} by name.` });
   return issues;
 }

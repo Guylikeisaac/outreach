@@ -4,7 +4,7 @@
 import type { Campaign } from '@shared/types';
 import type { ContentEvent, UiRequest, UiResponse } from '@shared/messages';
 import { isLinkedInUrl } from '@shared/linkedin';
-import { templateIssues } from '@shared/message';
+import { DEFAULT_TEMPLATE, LEGACY_TEMPLATE, templateIssues } from '@shared/message';
 import { get, set, update, withLock } from '@shared/storage';
 import { log } from './log';
 import { requestStop, setRun, startDiscovery } from './discovery';
@@ -13,6 +13,12 @@ import { syncNow } from './sync';
 import { DEFAULT_DAILY_SEND_LIMIT, MAX_DAILY_SEND_LIMIT } from './autopilot';
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
+
+// Migrate a saved message that is still the old long pitch (over the 200-char limit) to the new default.
+void (async () => {
+  const settings = await get('settings');
+  if (settings.messageTemplate === LEGACY_TEMPLATE) await update('settings', (s) => ({ ...s, messageTemplate: DEFAULT_TEMPLATE }));
+})();
 
 // A worker restart kills any in-flight run; don't leave the UI showing "running" forever.
 void (async () => {
